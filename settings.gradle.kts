@@ -12,7 +12,7 @@ pluginManagement {
     }
 }
 
-rootProject.name = "continuum-feature-template"
+rootProject.name = "continuum-feature-knime"
 
 include(":features:continuum-feature-hello")
 include(":features:continuum-feature-hello-java")

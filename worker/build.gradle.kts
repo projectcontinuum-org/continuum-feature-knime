@@ -2,15 +2,18 @@ plugins {
     id("org.projectcontinuum.worker")
 }
 
-group = "org.projectcontinuum.app.worker.example"
-description = "Continuum Feature Example Worker — Spring Boot worker application for example feature nodes"
-version = "0.0.1"
+group = "org.projectcontinuum.feature.base"
+description = "Continuum Feature Base Worker — Spring Boot worker application for base feature nodes"
+version = property("featureVersion").toString()
+
+// get continuum platform version from root project properties
+val continuumPlatformVersion = property("continuumPlatformVersion").toString()
 
 continuum {
-    continuumVersion.set("0.0.6-SNAPSHOT")
+    continuumVersion.set(continuumPlatformVersion)
 }
 
 dependencies {
-    implementation(project(":features:continuum-feature-hello"))
-    implementation(project(":features:continuum-feature-hello-java"))
+    // Feature node modules (local project)
+//    implementation(project(":features:continuum-feature-analytics"))
 }
