@@ -1,4 +1,4 @@
-package org.projectcontinuum.app.worker.example
+package org.projectcontinuum.feature.knime.worker
 
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
