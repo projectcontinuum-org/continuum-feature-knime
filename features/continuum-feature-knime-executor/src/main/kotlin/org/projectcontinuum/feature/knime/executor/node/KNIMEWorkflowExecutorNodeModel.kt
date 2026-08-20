@@ -13,6 +13,7 @@ import org.projectcontinuum.core.commons.utils.NodeOutputWriter
 import org.projectcontinuum.feature.knime.executor.service.KNIMECliService
 import org.projectcontinuum.feature.knime.executor.config.KnimeExecutorProperties
 import org.slf4j.LoggerFactory
+import org.springframework.http.MediaType.TEXT_PLAIN_VALUE
 import tools.jackson.core.type.TypeReference
 import tools.jackson.databind.ObjectMapper
 import java.io.File
@@ -39,7 +40,12 @@ class KNIMEWorkflowExecutorNodeModel(
   }
 
   final override val inputPorts = emptyMap<String, ContinuumWorkflowModel.NodePort>()
-  final override val outputPorts = emptyMap<String, ContinuumWorkflowModel.NodePort>()
+  final override val outputPorts = mapOf(
+    "destinationPath" to ContinuumWorkflowModel.NodePort(
+      name = "destination path",
+      contentType = TEXT_PLAIN_VALUE
+    )
+  )
 
   override val categories = listOf("Integration & Automation")
 
@@ -277,7 +283,10 @@ class KNIMEWorkflowExecutorNodeModel(
           cleanupStage = StageStatus.PENDING
         )
         LOGGER.info("Uploading workflow to: $outputLocation")
-        uploadWorkflow(workflowSource, outputLocation)
+        val destinationPath = uploadWorkflow(workflowSource, outputLocation)
+        nodeOutputWriter.createOutputPortWriter("destinationPath").use { writer ->
+          writer.write(0L, mapOf("destinationPath" to destinationPath))
+        }
 
         reportStageProgress(
           progressPercentage = 90,
@@ -397,9 +406,9 @@ class KNIMEWorkflowExecutorNodeModel(
     throw NotImplementedError("S3 download support coming in future version")
   }
 
-  private fun uploadWorkflow(sourceFile: File, location: String) {
+  private fun uploadWorkflow(sourceFile: File, location: String): String {
     try {
-      when {
+      return when {
         location.startsWith("s3://") -> uploadToS3(sourceFile, location)
         location.startsWith("/") || location.contains(":\\") -> {
           // Local file path
@@ -408,6 +417,7 @@ class KNIMEWorkflowExecutorNodeModel(
           val destFile = File(destDir, sourceFile.name)
           sourceFile.copyTo(destFile, overwrite = true)
           LOGGER.info("Uploaded workflow to local path: ${destFile.absolutePath}")
+          destFile.absolutePath
         }
         else -> throw Exception("Unsupported output location format: $location")
       }
@@ -420,7 +430,7 @@ class KNIMEWorkflowExecutorNodeModel(
     }
   }
 
-  private fun uploadToS3(sourceFile: File, s3Path: String) {
+  private fun uploadToS3(sourceFile: File, s3Path: String): String {
     // TODO: Implement S3 upload using AWS SDK
     // For now, provide a placeholder
     LOGGER.warn("S3 upload not yet implemented for path: $s3Path")

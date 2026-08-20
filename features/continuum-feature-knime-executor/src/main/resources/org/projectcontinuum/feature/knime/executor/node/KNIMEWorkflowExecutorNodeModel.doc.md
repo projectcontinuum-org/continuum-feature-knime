@@ -32,7 +32,7 @@ Use this node when you need to run KNIME workflows as part of a larger automated
 ### Output Ports
 | Port | Type | Format | Description |
 |------|------|--------|-------------|
-| (none) | - | - | Results are automatically archived by the worker |
+| destinationPath | Table | text/plain | Single-row table with the absolute path of the executed `.knwf` file at its final destination |
 
 ### Properties
 
