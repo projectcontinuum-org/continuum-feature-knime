@@ -38,7 +38,7 @@ Use this node when you need to run KNIME workflows as part of a larger automated
 
 | Setting | Required | What It Does |
 |---------|----------|--------------|
-| **Workflow Location** | Yes | Where your KNIME workflow file is stored (local path, web URL, or cloud storage) |
+| **Workflow Location** | Yes | Where your KNIME `.knwf` workflow file is stored (local path, web URL, or cloud storage) |
 | **Execution Timeout** | No | Maximum time to wait for workflow to complete (default: 5 minutes) |
 
 **Note:** Results are automatically stored in the worker's configured results location. Temporary files are automatically cleaned up after upload to conserve disk space.
@@ -57,7 +57,7 @@ Use this node when you need to run KNIME workflows as part of a larger automated
 
 ### Step 1: Prepare Your Workflow
 
-Export your KNIME workflow as a `.knwf` file or `.zip` archive and save it in a location accessible from Continuum (local network, web server, or cloud storage).
+Export your KNIME workflow as a `.knwf` file and save it in a location accessible from Continuum (local network, web server, or cloud storage).
 
 ### Step 2: Configure the Node
 
@@ -81,7 +81,7 @@ You can store workflows and results in several places:
 | Location Type | Example | Notes |
 |---------------|---------|-------|
 | Local Network | `/shared/workflows/my-analysis.knwf` | File must be accessible from the worker |
-| Web Server | `https://company.com/workflows/report.zip` | Use HTTPS for secure download |
+| Web Server | `https://company.com/workflows/report.knwf` | Use HTTPS for secure download |
 | Cloud Storage | `s3://my-bucket/workflows/` | (Future support planned) |
 
 ---
@@ -150,7 +150,7 @@ Provide data analysis capabilities to other teams by embedding KNIME workflows i
 **Configuration:**
 ```json
 {
-  "workflowLocation": "https://analytics.company.com/workflows/forecast-model.zip",
+  "workflowLocation": "https://analytics.company.com/workflows/forecast-model.knwf",
   "timeoutSeconds": 1200
 }
 ```

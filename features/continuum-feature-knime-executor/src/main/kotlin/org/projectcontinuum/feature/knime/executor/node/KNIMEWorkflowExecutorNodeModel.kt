@@ -19,9 +19,6 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.util.UUID
-import java.util.zip.ZipEntry
-import java.util.zip.ZipInputStream
-import java.util.zip.ZipOutputStream
 import kotlin.io.path.pathString
 
 @ContinuumNode
@@ -36,7 +33,6 @@ class KNIMEWorkflowExecutorNodeModel(
 
     // Stage names for progress reporting
     private const val STAGE_DOWNLOAD_WORKFLOW = "Download Workflow"
-    private const val STAGE_UNZIP_WORKFLOW = "Unzip Workflow"
     private const val STAGE_EXECUTE_WORKFLOW = "Execute Workflow"
     private const val STAGE_UPLOAD_RESULTS = "Upload Results"
     private const val STAGE_CLEANUP = "Cleanup"
@@ -55,7 +51,7 @@ class KNIMEWorkflowExecutorNodeModel(
           "workflowLocation": {
             "type": "string",
             "title": "Workflow Location",
-            "description": "Local file/directory or URL to KNIME workflow: path/to/workflow.knwf, path/to/workflow.zip, path/to/workflow/, https://example.com/workflow.zip, or s3://bucket/workflow.zip"
+            "description": "Local path or URL to a KNIME .knwf workflow file: path/to/workflow.knwf, https://example.com/workflow.knwf, or s3://bucket/workflow.knwf"
           },
           "timeoutSeconds": {
             "type": "integer",
@@ -83,7 +79,7 @@ class KNIMEWorkflowExecutorNodeModel(
                 "type": "Control",
                 "scope": "#/properties/workflowLocation",
                 "options": {
-                  "placeholder": "https://example.com/workflow.zip or /path/to/workflow.zip"
+                  "placeholder": "https://example.com/workflow.knwf or /path/to/workflow.knwf"
                 }
               }
             ]
@@ -139,7 +135,6 @@ class KNIMEWorkflowExecutorNodeModel(
       progressPercentage: Int,
       message: String,
       downloadStage: StageStatus,
-      unzipStage: StageStatus,
       executeStage: StageStatus,
       uploadStage: StageStatus,
       cleanupStage: StageStatus
@@ -150,7 +145,6 @@ class KNIMEWorkflowExecutorNodeModel(
           message = message,
           stageStatus = mapOf(
             STAGE_DOWNLOAD_WORKFLOW to downloadStage,
-            STAGE_UNZIP_WORKFLOW to unzipStage,
             STAGE_EXECUTE_WORKFLOW to executeStage,
             STAGE_UPLOAD_RESULTS to uploadStage,
             STAGE_CLEANUP to cleanupStage
@@ -165,7 +159,6 @@ class KNIMEWorkflowExecutorNodeModel(
         progressPercentage = 0,
         message = "Initializing workflow executor",
         downloadStage = StageStatus.PENDING,
-        unzipStage = StageStatus.PENDING,
         executeStage = StageStatus.PENDING,
         uploadStage = StageStatus.PENDING,
         cleanupStage = StageStatus.PENDING
@@ -177,6 +170,14 @@ class KNIMEWorkflowExecutorNodeModel(
           nodeId = "",
           message = "workflowLocation property is required"
         )
+
+      if (!workflowLocation.lowercase().endsWith(".knwf")) {
+        throw NodeRuntimeException(
+          workflowId = "",
+          nodeId = "",
+          message = "workflowLocation must point to a .knwf file: $workflowLocation"
+        )
+      }
 
       // Output location is implicit and configured by the worker via system property or environment variable
       val outputLocation = System.getProperty("knime.results.output")
@@ -200,98 +201,42 @@ class KNIMEWorkflowExecutorNodeModel(
       val baseWorkspaceDir = File(System.getProperty("java.io.tmpdir"))
       val tempDir = File(baseWorkspaceDir, "knime_workspace_${UUID.randomUUID()}")
       tempDir.mkdirs()
-      val workflowDir = File(tempDir, "workflow")
-      workflowDir.mkdirs()
 
       LOGGER.info("Created temp workspace: ${tempDir.absolutePath}")
 
       try {
-        // Download workflow (0-20%)
+        // Download workflow (0-30%)
         reportStageProgress(
           progressPercentage = 0,
           message = "Downloading workflow from: $workflowLocation",
           downloadStage = StageStatus.IN_PROGRESS,
-          unzipStage = StageStatus.PENDING,
           executeStage = StageStatus.PENDING,
           uploadStage = StageStatus.PENDING,
           cleanupStage = StageStatus.PENDING
         )
         LOGGER.info("Downloading workflow from: $workflowLocation")
-        // Determine destination filename based on source (preserve .knwf extension)
         val destFileName = determineDestinationName(workflowLocation)
         val workflowSource = File(tempDir, destFileName)
         downloadWorkflow(workflowLocation, workflowSource)
 
         reportStageProgress(
-          progressPercentage = 20,
+          progressPercentage = 30,
           message = "Workflow retrieved successfully",
           downloadStage = StageStatus.COMPLETED,
-          unzipStage = StageStatus.PENDING,
           executeStage = StageStatus.PENDING,
           uploadStage = StageStatus.PENDING,
           cleanupStage = StageStatus.PENDING
         )
 
-        // Determine execution path and whether unzipping is needed
-        // .knwf files are executed directly by KNIME batch executor (no unzip needed)
-        // .zip files and directories need extraction/copying
-        var executionWorkflowPath = workflowDir.absolutePath
-        val isKnwfFile = workflowSource.isFile && workflowSource.name.endsWith(".knwf")
+        // KNIME batch executor (NodePitBatchExecutor) accepts the .knwf path directly:
+        // it unzips, executes, and saves the result back into the same .knwf file.
+        val executionWorkflowPath = workflowSource.absolutePath
 
-        if (isKnwfFile) {
-          // KNIME batch executor supports .knwf files directly - no extraction needed
-          LOGGER.info("Using .knwf file directly without extraction")
-          executionWorkflowPath = workflowSource.absolutePath
-          // Skip unzip stage since no extraction is needed
-          reportStageProgress(
-            progressPercentage = 40,
-            message = "Workflow prepared successfully (native .knwf format)",
-            downloadStage = StageStatus.COMPLETED,
-            unzipStage = StageStatus.COMPLETED,
-            executeStage = StageStatus.PENDING,
-            uploadStage = StageStatus.PENDING,
-            cleanupStage = StageStatus.PENDING
-          )
-        } else {
-          // Unzip workflow if it's an archive (20-40%)
-          reportStageProgress(
-            progressPercentage = 20,
-            message = "Processing workflow archive",
-            downloadStage = StageStatus.COMPLETED,
-            unzipStage = StageStatus.IN_PROGRESS,
-            executeStage = StageStatus.PENDING,
-            uploadStage = StageStatus.PENDING,
-            cleanupStage = StageStatus.PENDING
-          )
-          
-          // Extract if we have a ZIP file, or just use directory if already copied
-          if (workflowSource.isFile && workflowSource.name.endsWith(".zip")) {
-            LOGGER.info("Extracting ZIP workflow archive")
-            unzipWorkflow(workflowSource, workflowDir)
-            LOGGER.info("Workflow archive extracted")
-          } else if (workflowSource.isDirectory) {
-            // Already copied as directory, nothing more to do
-            LOGGER.info("Workflow directory already in place")
-            executionWorkflowPath = workflowSource.absolutePath
-          }
-
-          reportStageProgress(
-            progressPercentage = 40,
-            message = "Workflow prepared successfully",
-            downloadStage = StageStatus.COMPLETED,
-            unzipStage = StageStatus.COMPLETED,
-            executeStage = StageStatus.PENDING,
-            uploadStage = StageStatus.PENDING,
-            cleanupStage = StageStatus.PENDING
-          )
-        }
-
-        // Execute workflow (40-70%)
+        // Execute workflow (30-70%)
         reportStageProgress(
-          progressPercentage = 40,
+          progressPercentage = 30,
           message = "Executing KNIME workflow (timeout: ${timeoutSeconds}s)",
           downloadStage = StageStatus.COMPLETED,
-          unzipStage = StageStatus.COMPLETED,
           executeStage = StageStatus.IN_PROGRESS,
           uploadStage = StageStatus.PENDING,
           cleanupStage = StageStatus.PENDING
@@ -317,7 +262,6 @@ class KNIMEWorkflowExecutorNodeModel(
           progressPercentage = 70,
           message = "KNIME workflow executed successfully",
           downloadStage = StageStatus.COMPLETED,
-          unzipStage = StageStatus.COMPLETED,
           executeStage = StageStatus.COMPLETED,
           uploadStage = StageStatus.PENDING,
           cleanupStage = StageStatus.PENDING
@@ -326,42 +270,19 @@ class KNIMEWorkflowExecutorNodeModel(
         // Upload result (70-90%)
         reportStageProgress(
           progressPercentage = 70,
-          message = "Preparing workflow results for upload",
-          downloadStage = StageStatus.COMPLETED,
-          unzipStage = StageStatus.COMPLETED,
-          executeStage = StageStatus.COMPLETED,
-          uploadStage = StageStatus.IN_PROGRESS,
-          cleanupStage = StageStatus.PENDING
-        )
-        LOGGER.info("Preparing workflow results for upload")
-        val outputZipFile = File(tempDir, "workflow_executed_${System.currentTimeMillis()}.zip")
-        
-        // Zip the appropriate source based on workflow type
-        if (isKnwfFile) {
-          LOGGER.info("Creating ZIP with .knwf file for upload")
-          zipSingleFile(workflowSource, outputZipFile)
-        } else {
-          LOGGER.info("Creating ZIP with workflow directory for upload")
-          zipWorkflow(workflowDir, outputZipFile)
-        }
-
-        reportStageProgress(
-          progressPercentage = 80,
           message = "Uploading results to: $outputLocation",
           downloadStage = StageStatus.COMPLETED,
-          unzipStage = StageStatus.COMPLETED,
           executeStage = StageStatus.COMPLETED,
           uploadStage = StageStatus.IN_PROGRESS,
           cleanupStage = StageStatus.PENDING
         )
         LOGGER.info("Uploading workflow to: $outputLocation")
-        uploadWorkflow(outputZipFile, outputLocation)
+        uploadWorkflow(workflowSource, outputLocation)
 
         reportStageProgress(
           progressPercentage = 90,
           message = "Results uploaded successfully",
           downloadStage = StageStatus.COMPLETED,
-          unzipStage = StageStatus.COMPLETED,
           executeStage = StageStatus.COMPLETED,
           uploadStage = StageStatus.COMPLETED,
           cleanupStage = StageStatus.PENDING
@@ -372,7 +293,6 @@ class KNIMEWorkflowExecutorNodeModel(
           progressPercentage = 90,
           message = "Cleaning up temporary files",
           downloadStage = StageStatus.COMPLETED,
-          unzipStage = StageStatus.COMPLETED,
           executeStage = StageStatus.COMPLETED,
           uploadStage = StageStatus.COMPLETED,
           cleanupStage = StageStatus.IN_PROGRESS
@@ -385,7 +305,6 @@ class KNIMEWorkflowExecutorNodeModel(
           progressPercentage = 100,
           message = "Workflow execution completed successfully",
           downloadStage = StageStatus.COMPLETED,
-          unzipStage = StageStatus.COMPLETED,
           executeStage = StageStatus.COMPLETED,
           uploadStage = StageStatus.COMPLETED,
           cleanupStage = StageStatus.COMPLETED
@@ -419,18 +338,11 @@ class KNIMEWorkflowExecutorNodeModel(
   }
 
   private fun determineDestinationName(location: String): String {
-    // Extract filename from location to preserve extension
+    // Extract filename from location (extension already validated as .knwf)
     return when {
       location.contains("/") -> location.substringAfterLast("/")
       location.contains("\\") -> location.substringAfterLast("\\")
-      else -> "workflow.knwf"
-    }.let { filename ->
-      // If filename has no extension, add .knwf or .zip as appropriate
-      if (!filename.contains(".")) {
-        "$filename.knwf"
-      } else {
-        filename
-      }
+      else -> location
     }
   }
 
@@ -440,27 +352,18 @@ class KNIMEWorkflowExecutorNodeModel(
         location.startsWith("s3://") -> downloadFromS3(location, destination)
         location.startsWith("http://") || location.startsWith("https://") -> downloadFromHttp(location, destination)
         location.startsWith("/") || location.contains(":\\") -> {
-          // Local file path or directory
+          // Local .knwf file path
           val source = File(location)
           if (!source.exists()) {
-            throw Exception("Workflow file or directory not found: $location")
+            throw Exception("Workflow file not found: $location")
+          }
+          if (!source.isFile) {
+            throw Exception("Unsupported workflow format. Use a .knwf file: $location")
           }
 
-          when {
-            source.isDirectory -> {
-              // Directory: copy contents directly to workflow directory
-              LOGGER.info("Copying workflow directory from: $location")
-              source.copyRecursively(destination, overwrite = true)
-              LOGGER.info("Copied workflow directory: $location")
-            }
-            source.isFile && (location.endsWith(".zip") || location.endsWith(".knwf")) -> {
-              // ZIP or KNWF file: copy to temp location (no extraction for .knwf files)
-              LOGGER.info("Copying workflow file from: $location")
-              source.copyTo(destination, overwrite = true)
-              LOGGER.info("Copied workflow file: $location")
-            }
-            else -> throw Exception("Unsupported workflow format. Use .knwf, .zip files or a directory: $location")
-          }
+          LOGGER.info("Copying workflow file from: $location")
+          source.copyTo(destination, overwrite = true)
+          LOGGER.info("Copied workflow file: $location")
         }
         else -> throw Exception("Unsupported workflow location format: $location")
       }
@@ -492,106 +395,6 @@ class KNIMEWorkflowExecutorNodeModel(
     // For now, provide a placeholder
     LOGGER.warn("S3 download not yet implemented for path: $s3Path")
     throw NotImplementedError("S3 download support coming in future version")
-  }
-
-  private fun unzipWorkflow(zipFile: File, destination: File) {
-    try {
-      ZipInputStream(zipFile.inputStream()).use { zipInput ->
-        var entry = zipInput.nextEntry
-        while (entry != null) {
-          val file = File(destination, entry.name)
-
-          if (entry.isDirectory) {
-            file.mkdirs()
-          } else {
-            file.parentFile?.mkdirs()
-            file.outputStream().use { output ->
-              zipInput.copyTo(output)
-            }
-          }
-
-          entry = zipInput.nextEntry
-        }
-      }
-      LOGGER.info("Unzipped workflow to: ${destination.absolutePath}")
-    } catch (e: Exception) {
-      throw NodeRuntimeException(
-        workflowId = "",
-        nodeId = "",
-        message = "Failed to unzip workflow: ${e.message}"
-      )
-    }
-  }
-
-  private fun zipWorkflow(sourceDir: File, destination: File) {
-    try {
-      if (!sourceDir.exists() || !sourceDir.isDirectory) {
-        throw Exception("Source directory does not exist or is not a directory: ${sourceDir.absolutePath}")
-      }
-
-      val files = sourceDir.walkTopDown().filter { it.isFile }.toList()
-      LOGGER.info("Zipping ${files.size} files from: ${sourceDir.absolutePath}")
-
-      ZipOutputStream(destination.outputStream()).use { zipOutput ->
-        files.forEach { file ->
-          try {
-            // Use forward slashes for ZIP entries (ZIP standard)
-            val relativePath = file.relativeTo(sourceDir).path.replace("\\", "/")
-            val entry = ZipEntry(relativePath)
-            entry.size = file.length()
-            entry.compressedSize = -1
-            zipOutput.putNextEntry(entry)
-
-            file.inputStream().buffered().use { input ->
-              input.copyTo(zipOutput)
-            }
-            zipOutput.closeEntry()
-            LOGGER.debug("Zipped file: $relativePath (${file.length()} bytes)")
-          } catch (e: Exception) {
-            LOGGER.error("Error zipping file ${file.absolutePath}: ${e.message}")
-            throw e
-          }
-        }
-      }
-
-      LOGGER.info("Zipped workflow to: ${destination.absolutePath} (size: ${destination.length()} bytes)")
-    } catch (e: Exception) {
-      throw NodeRuntimeException(
-        workflowId = "",
-        nodeId = "",
-        message = "Failed to zip workflow: ${e.message}"
-      )
-    }
-  }
-
-  private fun zipSingleFile(sourceFile: File, destination: File) {
-    try {
-      if (!sourceFile.exists() || !sourceFile.isFile) {
-        throw Exception("Source file does not exist or is not a file: ${sourceFile.absolutePath}")
-      }
-
-      LOGGER.info("Zipping single file: ${sourceFile.absolutePath} (${sourceFile.length()} bytes)")
-
-      ZipOutputStream(destination.outputStream()).use { zipOutput ->
-        val entry = ZipEntry(sourceFile.name)
-        entry.size = sourceFile.length()
-        entry.compressedSize = -1
-        zipOutput.putNextEntry(entry)
-
-        sourceFile.inputStream().buffered().use { input ->
-          input.copyTo(zipOutput)
-        }
-        zipOutput.closeEntry()
-      }
-
-      LOGGER.info("Zipped single file to: ${destination.absolutePath} (size: ${destination.length()} bytes)")
-    } catch (e: Exception) {
-      throw NodeRuntimeException(
-        workflowId = "",
-        nodeId = "",
-        message = "Failed to zip file: ${e.message}"
-      )
-    }
   }
 
   private fun uploadWorkflow(sourceFile: File, location: String) {
