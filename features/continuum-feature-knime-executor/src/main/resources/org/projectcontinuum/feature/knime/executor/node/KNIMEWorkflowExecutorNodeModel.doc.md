@@ -40,6 +40,7 @@ Use this node when you need to run KNIME workflows as part of a larger automated
 |---------|----------|--------------|
 | **Workflow Location** | Yes | Where your KNIME `.knwf` workflow file is stored (local path, web URL, or cloud storage) |
 | **Execution Timeout** | No | Maximum time to wait for workflow to complete (default: 5 minutes) |
+| **Reset Workflow Before Execution** | No | Clears node outputs before running (default: off) — useful when re-running a workflow that previously left nodes with cached outputs |
 
 **Note:** Results are automatically stored in the worker's configured results location. Temporary files are automatically cleaned up after upload to conserve disk space.
 

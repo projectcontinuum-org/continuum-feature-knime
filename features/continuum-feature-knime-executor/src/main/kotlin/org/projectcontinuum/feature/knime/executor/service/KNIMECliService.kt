@@ -32,9 +32,10 @@ class KNIMECliService(
   fun executeWorkflow(
     workflowPath: String,
     workspaceDir: String,
-    timeoutSeconds: Int
+    timeoutSeconds: Int,
+    reset: Boolean = false
   ): ProcessResult {
-    val command = buildCommand(workflowPath, workspaceDir)
+    val command = buildCommand(workflowPath, workspaceDir, reset)
 
     LOGGER.info("Executing KNIME workflow: $workflowPath")
     LOGGER.debug("KNIME command: $command")
@@ -90,13 +91,14 @@ class KNIMECliService(
     }
   }
 
-  private fun buildCommand(workflowPath: String, workspaceDir: String): String {
+  private fun buildCommand(workflowPath: String, workspaceDir: String, reset: Boolean): String {
+    val resetFlag = if (reset) "--reset \\\n      " else ""
     return """
       "${knimeProperties.getExecutablePath()}" \
       -nosplash \
       --launcher.suppressErrors \
       -application $KNIME_BATCH_EXECUTOR \
-      --save \
+      $resetFlag--save \
       "$workflowPath"
     """.trimIndent()
   }

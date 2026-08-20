@@ -64,6 +64,12 @@ class KNIMEWorkflowExecutorNodeModel(
             "title": "Execution Timeout (seconds)",
             "default": 300,
             "minimum": 10
+          },
+          "resetWorkflow": {
+            "type": "boolean",
+            "title": "Reset Workflow Before Execution",
+            "description": "Pass --reset to the KNIME batch executor to clear node outputs before running",
+            "default": false
           }
         },
         "required": ["workflowLocation"]
@@ -97,6 +103,10 @@ class KNIMEWorkflowExecutorNodeModel(
               {
                 "type": "Control",
                 "scope": "#/properties/timeoutSeconds"
+              },
+              {
+                "type": "Control",
+                "scope": "#/properties/resetWorkflow"
               }
             ]
           }
@@ -121,7 +131,8 @@ class KNIMEWorkflowExecutorNodeModel(
     outputs = outputPorts,
     properties = mapOf(
       "workflowLocation" to "",
-      "timeoutSeconds" to 300
+      "timeoutSeconds" to 300,
+      "resetWorkflow" to false
     ),
     propertiesSchema = propertiesSchema,
     propertiesUISchema = propertiesUiSchema
@@ -191,6 +202,7 @@ class KNIMEWorkflowExecutorNodeModel(
         ?: File(System.getProperty("java.io.tmpdir"), "knime-results").absolutePath
 
       val timeoutSeconds = (properties["timeoutSeconds"] as? Number)?.toInt() ?: 300
+      val resetWorkflow = properties["resetWorkflow"] as? Boolean ?: false
 
       if (timeoutSeconds < 10) {
         throw NodeRuntimeException(
@@ -251,7 +263,8 @@ class KNIMEWorkflowExecutorNodeModel(
         val result = knimeCliService.executeWorkflow(
           workflowPath = executionWorkflowPath,
           workspaceDir = tempDir.absolutePath,
-          timeoutSeconds = timeoutSeconds
+          timeoutSeconds = timeoutSeconds,
+          reset = resetWorkflow
         )
 
         if (result.exitCode != 0) {
