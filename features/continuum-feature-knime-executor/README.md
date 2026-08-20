@@ -289,6 +289,7 @@ continuum:
 | workflowLocation | String | ✅ | - | URL or file path |
 | outputLocation | String | ✅ | - | URL or file path |
 | timeoutSeconds | Integer | ❌ | 300 | 10-3600 |
+| resetWorkflow | Boolean | ❌ | false | true/false |
 | workspaceDir | String | ❌ | /tmp | Writable directory |
 | deleteLocalFiles | Boolean | ❌ | true | true/false |
 
