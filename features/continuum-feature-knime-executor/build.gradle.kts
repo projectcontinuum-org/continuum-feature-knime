@@ -21,8 +21,5 @@ dependencies {
     implementation("com.networknt:json-schema-validator:3.0.0")
 
     // Test dependencies
-    testImplementation("org.junit.jupiter:junit-jupiter")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testImplementation("io.mockk:mockk:1.13.8")
-    testImplementation("org.jetbrains.kotlin:kotlin-test")
 }

@@ -2,7 +2,7 @@
   <configuration default="false" name="FeatureKnime" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot" folderName="Features">
     <envs>
       <env name="CONTINUUM_NODE_TASK_QUEUE" value="FEATURE-KNIME-TASK-QUEUE" />
-      <env name="KNIME_HOME" value="$USER_HOME$/tools/knime_5.12.0" />
+      <env name="KNIME_HOME" value="/Applications/KNIME 5.12.0.app/Contents/MacOS" />
     </envs>
     <module name="continuum-feature-knime.worker.main" />
     <option name="SPRING_BOOT_MAIN_CLASS" value="org.projectcontinuum.feature.knime.worker.App" />
