@@ -22,7 +22,7 @@ This is the **KNIME workflow execution feature** for [Project Continuum](https:/
 
 A standalone Gradle feature module containing **1 production-ready node** for executing KNIME workflows. The node automates the complete workflow lifecycle:
 
-1. **Download** KNIME workflow archives from remote locations
+1. **Download** KNIME `.knwf` workflow files from remote locations
 2. **Execute** workflows using KNIME's batch executor
 3. **Capture** execution results with detailed logging
 4. **Upload** executed workflows to configured output locations
@@ -59,7 +59,7 @@ implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.18.2")
 **Runtime Requirements:**
 - KNIME 5.0+ installed and in PATH (or configured via `KNIME_HOME`)
 - Java 21+ (JVM runtime)
-- Temporary disk space for workflow extraction and execution
+- Temporary disk space for workflow download and execution
 
 **Test Dependencies:**
 - JUnit 5 for test execution
@@ -205,7 +205,7 @@ fun executeWorkflow(
 ### KNIMEWorkflowExecutorNodeModel.kt
 - **Purpose:** Continuum node orchestrating complete workflow execution
 - **Responsibilities:**
-  - Coordinate download → extract → execute → upload pipeline
+  - Coordinate download → execute → upload pipeline
   - Manage temporary workspace creation/cleanup
   - Report progress in 10% increments
   - Handle errors with detailed diagnostics
@@ -214,12 +214,9 @@ fun executeWorkflow(
 ```
 0% - Validate
 10% - Create workspace
-20% - Download workflow
-30% - Extract ZIP
-40% - Execute KNIME
-70% - Package result
-80% - Upload
-90% - Cleanup
+30% - Download workflow (.knwf)
+70% - Execute KNIME (batch executor unzips → executes → saves .knwf in place)
+90% - Upload
 100% - Complete
 ```
 
@@ -248,7 +245,7 @@ fun executeWorkflow(
 
 ### Integration Testing (Future)
 - KNIMEWorkflowExecutorNodeModel orchestration flow
-- Download/extract/upload methods with mock locations
+- Download/upload methods with mock locations
 - End-to-end workflow execution scenarios
 
 ---
