@@ -2,8 +2,8 @@ plugins {
     id("org.projectcontinuum.worker")
 }
 
-group = "org.projectcontinuum.feature.base"
-description = "Continuum Feature Base Worker — Spring Boot worker application for base feature nodes"
+group = "org.projectcontinuum.feature.knime"
+description = "Continuum Feature KNIME Worker — Spring Boot worker application for KNIME feature nodes"
 version = property("featureVersion").toString()
 
 // get continuum platform version from root project properties
@@ -15,5 +15,5 @@ continuum {
 
 dependencies {
     // Feature node modules (local project)
-//    implementation(project(":features:continuum-feature-analytics"))
+    implementation(project(":features:continuum-feature-knime-executor"))
 }

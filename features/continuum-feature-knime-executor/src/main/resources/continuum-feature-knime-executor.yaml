@@ -1,0 +1,11 @@
+continuum:
+  feature:
+    knime:
+      executor:
+        # Main KNIME installation directory (e.g., /opt/knime, /Applications/KNIME.app/Contents/MacOS, C:\KNIME)
+        # Must be configured via KNIME_HOME environment variable or application.yml
+        knime-home: ${KNIME_HOME}
+        # Relative path to the KNIME executable within knimeHome directory
+        # Default: "knime" (Unix/Linux/macOS)
+        # For Windows, may need to set to "knime.exe" or "knime.bat"
+        knime-executable: knime

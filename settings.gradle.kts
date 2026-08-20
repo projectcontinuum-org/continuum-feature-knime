@@ -16,4 +16,5 @@ rootProject.name = "continuum-feature-knime"
 
 include(":features:continuum-feature-hello")
 include(":features:continuum-feature-hello-java")
+include(":features:continuum-feature-knime-executor")
 include(":worker")
