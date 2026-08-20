@@ -20,6 +20,7 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.util.UUID
+import java.util.zip.ZipFile
 import kotlin.io.path.pathString
 
 @ContinuumNode
@@ -57,7 +58,7 @@ class KNIMEWorkflowExecutorNodeModel(
           "workflowLocation": {
             "type": "string",
             "title": "Workflow Location",
-            "description": "Local path or URL to a KNIME .knwf workflow file: path/to/workflow.knwf, https://example.com/workflow.knwf, or s3://bucket/workflow.knwf"
+            "description": "Local path or URL to a KNIME workflow: path/to/workflow.knwf, s3://bucket/workflow.knwf, or any http(s):// URL that returns a valid KNIME workflow archive (the .knwf extension is not required for http(s) URLs)"
           },
           "timeoutSeconds": {
             "type": "integer",
@@ -188,7 +189,13 @@ class KNIMEWorkflowExecutorNodeModel(
           message = "workflowLocation property is required"
         )
 
-      if (!workflowLocation.lowercase().endsWith(".knwf")) {
+      val isHttpLocation = workflowLocation.startsWith("http://") || workflowLocation.startsWith("https://")
+
+      // HTTP(S) endpoints rarely expose a .knwf-suffixed URL in practice (IDs, tokens,
+      // presigned/redirect URLs, content-negotiated APIs) — for those we validate the
+      // downloaded bytes instead of the URL string. Local paths and s3:// keys still require
+      // the extension since those are trusted, filesystem-shaped inputs we control.
+      if (!isHttpLocation && !workflowLocation.lowercase().endsWith(".knwf")) {
         throw NodeRuntimeException(
           workflowId = "",
           nodeId = "",
@@ -235,7 +242,11 @@ class KNIMEWorkflowExecutorNodeModel(
         LOGGER.info("Downloading workflow from: $workflowLocation")
         val destFileName = determineDestinationName(workflowLocation)
         val workflowSource = File(tempDir, destFileName)
-        downloadWorkflow(workflowLocation, workflowSource)
+        downloadWorkflow(workflowLocation, workflowSource, executionContext.ownerId)
+
+        if (isHttpLocation) {
+          validateKnimeWorkflowArchive(workflowSource, workflowLocation)
+        }
 
         reportStageProgress(
           progressPercentage = 30,
@@ -360,19 +371,47 @@ class KNIMEWorkflowExecutorNodeModel(
   }
 
   private fun determineDestinationName(location: String): String {
-    // Extract filename from location (extension already validated as .knwf)
-    return when {
-      location.contains("/") -> location.substringAfterLast("/")
-      location.contains("\\") -> location.substringAfterLast("\\")
-      else -> location
+    // The KNIME batch executor (NodePitBatchExecutor) resolves the archive by its local file
+    // extension, so the downloaded copy must end in .knwf even when the source URL doesn't
+    // (HTTP locations are no longer required to be .knwf-suffixed — see execute()).
+    val withoutQueryOrFragment = location.substringBefore("?").substringBefore("#")
+    val rawName = when {
+      withoutQueryOrFragment.contains("/") -> withoutQueryOrFragment.substringAfterLast("/")
+      withoutQueryOrFragment.contains("\\") -> withoutQueryOrFragment.substringAfterLast("\\")
+      else -> withoutQueryOrFragment
+    }.ifBlank { "workflow" }
+    return if (rawName.lowercase().endsWith(".knwf")) rawName else "$rawName.knwf"
+  }
+
+  /**
+   * Confirms downloaded bytes are actually a KNIME workflow archive (a zip containing a
+   * `workflow.knime` file) rather than trusting the source URL's shape — the substitute for
+   * the `.knwf` suffix check that HTTP(S) locations skip.
+   */
+  private fun validateKnimeWorkflowArchive(file: File, sourceLocation: String) {
+    val isValidKnimeArchive = runCatching {
+      ZipFile(file).use { zip ->
+        zip.entries().asSequence().any { entry ->
+          entry.name.removePrefix("/").substringAfterLast("/") == "workflow.knime"
+        }
+      }
+    }.getOrDefault(false)
+
+    if (!isValidKnimeArchive) {
+      throw NodeRuntimeException(
+        workflowId = "",
+        nodeId = "",
+        message = "Downloaded content from $sourceLocation is not a valid KNIME workflow archive " +
+          "(expected a workflow.knime entry)"
+      )
     }
   }
 
-  private fun downloadWorkflow(location: String, destination: File) {
+  private fun downloadWorkflow(location: String, destination: File, ownerId: String?) {
     try {
       when {
         location.startsWith("s3://") -> downloadFromS3(location, destination)
-        location.startsWith("http://") || location.startsWith("https://") -> downloadFromHttp(location, destination)
+        location.startsWith("http://") || location.startsWith("https://") -> downloadFromHttp(location, destination, ownerId)
         location.startsWith("/") || location.contains(":\\") -> {
           // Local .knwf file path
           val source = File(location)
@@ -398,9 +437,12 @@ class KNIMEWorkflowExecutorNodeModel(
     }
   }
 
-  private fun downloadFromHttp(url: String, destination: File) {
+  internal fun downloadFromHttp(url: String, destination: File, ownerId: String?) {
     try {
       val connection = java.net.URL(url).openConnection()
+      if (ownerId != null) {
+        connection.setRequestProperty("x-continuum-user-id", ownerId)
+      }
       connection.inputStream.use { input ->
         destination.outputStream().use { output ->
           input.copyTo(output)
