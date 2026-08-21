@@ -60,6 +60,11 @@ class KNIMEWorkflowExecutorNodeModel(
             "title": "Workflow Location",
             "description": "Local path or URL to a KNIME workflow: path/to/workflow.knwf, s3://bucket/workflow.knwf, or any http(s):// URL that returns a valid KNIME workflow archive (the .knwf extension is not required for http(s) URLs)"
           },
+          "executionUploadUrl": {
+            "type": "string",
+            "title": "Execution Result Upload URL",
+            "description": "HTTP(S) URL the executed .knwf is POSTed back to (multipart/form-data) once the workflow finishes, success or failure"
+          },
           "timeoutSeconds": {
             "type": "integer",
             "title": "Execution Timeout (seconds)",
@@ -73,7 +78,7 @@ class KNIMEWorkflowExecutorNodeModel(
             "default": false
           }
         },
-        "required": ["workflowLocation"]
+        "required": ["workflowLocation", "executionUploadUrl"]
       }
     """.trimIndent(),
     object : TypeReference<Map<String, Any>>() {}
@@ -93,6 +98,13 @@ class KNIMEWorkflowExecutorNodeModel(
                 "scope": "#/properties/workflowLocation",
                 "options": {
                   "placeholder": "https://example.com/workflow.knwf or /path/to/workflow.knwf"
+                }
+              },
+              {
+                "type": "Control",
+                "scope": "#/properties/executionUploadUrl",
+                "options": {
+                  "placeholder": "https://example.com/api/v1/knime-workflows/{workflowId}/executions"
                 }
               }
             ]
@@ -132,6 +144,7 @@ class KNIMEWorkflowExecutorNodeModel(
     outputs = outputPorts,
     properties = mapOf(
       "workflowLocation" to "",
+      "executionUploadUrl" to "",
       "timeoutSeconds" to 300,
       "resetWorkflow" to false
     ),
@@ -187,6 +200,13 @@ class KNIMEWorkflowExecutorNodeModel(
           workflowId = "",
           nodeId = "",
           message = "workflowLocation property is required"
+        )
+
+      val executionUploadUrl = (properties["executionUploadUrl"] as? String)?.trim()?.takeIf { it.isNotBlank() }
+        ?: throw NodeRuntimeException(
+          workflowId = "",
+          nodeId = "",
+          message = "executionUploadUrl property is required"
         )
 
       val isHttpLocation = workflowLocation.startsWith("http://") || workflowLocation.startsWith("https://")
@@ -277,6 +297,21 @@ class KNIMEWorkflowExecutorNodeModel(
           timeoutSeconds = timeoutSeconds,
           reset = resetWorkflow
         )
+
+        // Always report the outcome (success or failure) back to whoever will serve the
+        // executed workflow later — this must happen before the exit-code check below can
+        // throw and skip it.
+        val executionStatus = if (result.exitCode == 0) "SUCCESS" else "FAILED"
+        LOGGER.info("Uploading execution result ($executionStatus) to: $executionUploadUrl")
+        try {
+          uploadExecutionResult(workflowSource, executionUploadUrl, executionContext.ownerId, executionStatus)
+        } catch (e: Exception) {
+          throw NodeRuntimeException(
+            workflowId = "",
+            nodeId = "",
+            message = "Failed to upload execution result: ${e.message}"
+          )
+        }
 
         if (result.exitCode != 0) {
           LOGGER.error("KNIME workflow execution failed with exit code ${result.exitCode}")
@@ -459,6 +494,42 @@ class KNIMEWorkflowExecutorNodeModel(
     // For now, provide a placeholder
     LOGGER.warn("S3 download not yet implemented for path: $s3Path")
     throw NotImplementedError("S3 download support coming in future version")
+  }
+
+  /**
+   * Streams the executed .knwf as multipart/form-data rather than buffering it in memory —
+   * executed workflows can be large. `setChunkedStreamingMode` avoids HttpURLConnection's
+   * default behavior of buffering the entire request body when Content-Length isn't known
+   * upfront.
+   */
+  internal fun uploadExecutionResult(sourceFile: File, uploadUrl: String, ownerId: String?, status: String) {
+    val boundary = "----ContinuumBoundary${UUID.randomUUID()}"
+    val connection = java.net.URL(uploadUrl).openConnection() as java.net.HttpURLConnection
+    connection.requestMethod = "POST"
+    connection.doOutput = true
+    connection.setChunkedStreamingMode(8192)
+    connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+    if (ownerId != null) {
+      connection.setRequestProperty("x-continuum-user-id", ownerId)
+    }
+
+    connection.outputStream.use { output ->
+      output.write(
+        "--$boundary\r\nContent-Disposition: form-data; name=\"status\"\r\n\r\n$status\r\n".toByteArray()
+      )
+      output.write(
+        ("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"${sourceFile.name}\"\r\n" +
+          "Content-Type: application/octet-stream\r\n\r\n").toByteArray()
+      )
+      sourceFile.inputStream().use { it.copyTo(output) }
+      output.write("\r\n--$boundary--\r\n".toByteArray())
+    }
+
+    val responseCode = connection.responseCode
+    if (responseCode !in 200..299) {
+      throw Exception("Execution result upload failed with HTTP $responseCode: ${connection.responseMessage}")
+    }
+    LOGGER.info("Uploaded execution result to: $uploadUrl")
   }
 
   private fun uploadWorkflow(sourceFile: File, location: String): String {
