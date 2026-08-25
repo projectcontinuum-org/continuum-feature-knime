@@ -12,11 +12,14 @@ import org.projectcontinuum.core.commons.utils.NodeInputReader
 import org.projectcontinuum.core.commons.utils.NodeOutputWriter
 import org.projectcontinuum.feature.knime.executor.service.KNIMECliService
 import org.projectcontinuum.feature.knime.executor.config.KnimeExecutorProperties
+import org.projectcontinuum.feature.knime.executor.service.ProcessResult
 import org.slf4j.LoggerFactory
 import org.springframework.http.MediaType.TEXT_PLAIN_VALUE
+import org.springframework.web.util.UriUtils
 import tools.jackson.core.type.TypeReference
 import tools.jackson.databind.ObjectMapper
 import java.io.File
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.util.UUID
@@ -291,12 +294,20 @@ class KNIMEWorkflowExecutorNodeModel(
           cleanupStage = StageStatus.PENDING
         )
         LOGGER.info("Executing KNIME workflow from: $executionWorkflowPath")
-        val result = knimeCliService.executeWorkflow(
-          workflowPath = executionWorkflowPath,
-          workspaceDir = tempDir.absolutePath,
-          timeoutSeconds = timeoutSeconds,
-          reset = resetWorkflow
-        )
+        val result = try {
+          knimeCliService.executeWorkflow(
+            workflowPath = executionWorkflowPath,
+            workspaceDir = tempDir.absolutePath,
+            timeoutSeconds = timeoutSeconds,
+            reset = resetWorkflow
+          )
+        } catch (e: Exception) {
+          // The KNIME process can throw instead of returning a non-zero exit code (e.g. it times
+          // out and is killed, or fails to start). Fold that into a failed ProcessResult so the
+          // upload below still runs and the caller sees a FAILED execution instead of nothing.
+          LOGGER.error("KNIME workflow process failed to run: ${e.message}", e)
+          ProcessResult(exitCode = -1, stdout = "", stderr = e.message ?: "KNIME workflow process failed to run")
+        }
 
         // Always report the outcome (success or failure) back to whoever will serve the
         // executed workflow later — this must happen before the exit-code check below can
@@ -316,7 +327,11 @@ class KNIMEWorkflowExecutorNodeModel(
         if (result.exitCode != 0) {
           LOGGER.error("KNIME workflow execution failed with exit code ${result.exitCode}")
           LOGGER.error("stderr: ${result.stderr}")
+          // A non-zero exit from the KNIME batch executor means the workflow itself failed
+          // (bad node config, data error, etc.) — retrying would just reproduce the same
+          // failure, so this is not retriable.
           throw NodeRuntimeException(
+            isRetriable = false,
             workflowId = "",
             nodeId = "",
             message = "KNIME workflow execution failed with exit code ${result.exitCode}: ${result.stderr}"
@@ -379,6 +394,14 @@ class KNIMEWorkflowExecutorNodeModel(
         )
         LOGGER.info("KNIME Workflow Executor completed successfully")
 
+      } catch (e: NodeRuntimeException) {
+        // Rethrow as-is so isRetriable (e.g. false for a failed KNIME batch run above) survives
+        // instead of being lost to the generic NodeRuntimeException wrapping below.
+        LOGGER.error("Error during workflow execution", e)
+        if (tempDir.exists()) {
+          tempDir.deleteRecursively()
+        }
+        throw e
       } catch (e: Exception) {
         LOGGER.error("Error during workflow execution", e)
         // Attempt cleanup even on error
@@ -405,17 +428,28 @@ class KNIMEWorkflowExecutorNodeModel(
     }
   }
 
-  private fun determineDestinationName(location: String): String {
+  internal fun determineDestinationName(location: String): String {
     // The KNIME batch executor (NodePitBatchExecutor) resolves the archive by its local file
     // extension, so the downloaded copy must end in .knwf even when the source URL doesn't
     // (HTTP locations are no longer required to be .knwf-suffixed — see execute()).
     val withoutQueryOrFragment = location.substringBefore("?").substringBefore("#")
+    val isHttpLocation = withoutQueryOrFragment.startsWith("http://") || withoutQueryOrFragment.startsWith("https://")
     val rawName = when {
       withoutQueryOrFragment.contains("/") -> withoutQueryOrFragment.substringAfterLast("/")
       withoutQueryOrFragment.contains("\\") -> withoutQueryOrFragment.substringAfterLast("\\")
       else -> withoutQueryOrFragment
     }.ifBlank { "workflow" }
-    return if (rawName.lowercase().endsWith(".knwf")) rawName else "$rawName.knwf"
+    // The workflowLocation URL's file name is percent-encoded by KnimeWorkflowScheduleService
+    // (UriUtils.encodePathSegment) since the original file name can contain spaces/special
+    // characters. Decode it back here so the downloaded copy — and anything uploaded from it,
+    // like the execution result — keeps the original file name instead of literal %-escapes.
+    // Local paths and s3:// keys are never percent-encoded, so leave those untouched.
+    val decodedName = if (isHttpLocation) {
+      runCatching { UriUtils.decode(rawName, StandardCharsets.UTF_8) }.getOrDefault(rawName)
+    } else {
+      rawName
+    }
+    return if (decodedName.lowercase().endsWith(".knwf")) decodedName else "$decodedName.knwf"
   }
 
   /**

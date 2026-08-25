@@ -156,6 +156,22 @@ class KNIMEWorkflowExecutorNodeModelTest {
   }
 
   @Test
+  fun `determineDestinationName decodes a percent-encoded space in an HTTP URL's file name`() {
+    val destinationName = nodeModel.determineDestinationName(
+      "http://localhost:${server.address.port}/api/v1/knime-workflows/abc/content/My%20Workflow.knwf"
+    )
+
+    assertEquals("My Workflow.knwf", destinationName)
+  }
+
+  @Test
+  fun `determineDestinationName leaves a literal percent sign in a local path untouched`() {
+    val destinationName = nodeModel.determineDestinationName("/tmp/100%complete.knwf")
+
+    assertEquals("100%complete.knwf", destinationName)
+  }
+
+  @Test
   fun `execute throws when executionUploadUrl is missing`() {
     val sourceWorkflow = File.createTempFile("knime-workflow", ".knwf")
     try {
@@ -189,7 +205,7 @@ class KNIMEWorkflowExecutorNodeModelTest {
         "executionUploadUrl" to "http://localhost:${server.address.port}/upload"
       )
 
-      assertFailsWith<NodeRuntimeException> {
+      val thrown = assertFailsWith<NodeRuntimeException> {
         nodeModel.execute(
           properties,
           emptyMap(),
@@ -199,6 +215,37 @@ class KNIMEWorkflowExecutorNodeModelTest {
         )
       }
 
+      assertEquals(false, thrown.isRetriable)
+      assertTrue(String(receivedUploadBody!!).contains("FAILED"))
+    } finally {
+      sourceWorkflow.delete()
+    }
+  }
+
+  @Test
+  fun `execute still uploads a FAILED status when the KNIME process throws instead of exiting non-zero`() {
+    every { knimeCliService.executeWorkflow(any(), any(), any(), any()) } throws
+      RuntimeException("KNIME workflow execution timed out after 300 seconds")
+
+    val sourceWorkflow = File.createTempFile("knime-workflow", ".knwf")
+    try {
+      sourceWorkflow.writeBytes("dummy".toByteArray())
+      val properties = mapOf(
+        "workflowLocation" to sourceWorkflow.absolutePath,
+        "executionUploadUrl" to "http://localhost:${server.address.port}/upload"
+      )
+
+      val thrown = assertFailsWith<NodeRuntimeException> {
+        nodeModel.execute(
+          properties,
+          emptyMap(),
+          mockk(relaxed = true),
+          mockk(relaxed = true),
+          ExecutionContext()
+        )
+      }
+
+      assertEquals(false, thrown.isRetriable)
       assertTrue(String(receivedUploadBody!!).contains("FAILED"))
     } finally {
       sourceWorkflow.delete()
