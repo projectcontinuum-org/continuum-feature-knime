@@ -11,6 +11,18 @@ data class ProcessResult(
   val stderr: String
 )
 
+data class WorkflowVariable(
+  val name: String,
+  val value: String,
+  val type: String
+)
+
+data class WorkflowCredential(
+  val name: String,
+  val login: String? = null,
+  val password: String? = null
+)
+
 @Service
 class KNIMECliService(
   private val knimeProperties: KnimeExecutorProperties
@@ -33,9 +45,11 @@ class KNIMECliService(
     workflowPath: String,
     workspaceDir: String,
     timeoutSeconds: Int,
-    reset: Boolean = false
+    reset: Boolean = false,
+    variables: List<WorkflowVariable> = emptyList(),
+    credentials: List<WorkflowCredential> = emptyList()
   ): ProcessResult {
-    val command = buildCommand(workflowPath, workspaceDir, reset)
+    val command = buildCommand(workflowPath, workspaceDir, reset, variables, credentials)
 
     LOGGER.info("Executing KNIME workflow: $workflowPath")
     LOGGER.debug("KNIME command: $command")
@@ -91,15 +105,43 @@ class KNIMECliService(
     }
   }
 
-  private fun buildCommand(workflowPath: String, workspaceDir: String, reset: Boolean): String {
+  internal fun buildCommand(
+    workflowPath: String,
+    workspaceDir: String,
+    reset: Boolean,
+    variables: List<WorkflowVariable> = emptyList(),
+    credentials: List<WorkflowCredential> = emptyList()
+  ): String {
     val resetFlag = if (reset) "--reset \\\n      " else ""
+    val variableFlags = variables.joinToString("") { variable ->
+      "--variable=${shellQuote("${variable.name};${variable.value};${variable.type}")} \\\n      "
+    }
+    val credentialFlags = credentials.joinToString("") { credential ->
+      "--credential=${shellQuote(buildCredentialValue(credential))} \\\n      "
+    }
     return """
       "${knimeProperties.getExecutablePath()}" \
       -nosplash \
       --launcher.suppressErrors \
       -application $KNIME_BATCH_EXECUTOR \
-      $resetFlag--save \
+      $variableFlags$credentialFlags$resetFlag--save \
       "$workflowPath"
     """.trimIndent()
   }
+
+  /**
+   * The CLI's `<name[;login[;password]]>` syntax is positional/optional, so build the value
+   * from only the trailing present components — never emit an empty segment like `name;;`.
+   */
+  private fun buildCredentialValue(credential: WorkflowCredential): String = when {
+    credential.login != null && credential.password != null -> "${credential.name};${credential.login};${credential.password}"
+    credential.login != null -> "${credential.name};${credential.login}"
+    else -> credential.name
+  }
+
+  /**
+   * The full command runs via `/bin/bash -c`, so any interpolated value coming from user
+   * input (workflow variable values) must be shell-escaped to prevent command injection.
+   */
+  private fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 }
