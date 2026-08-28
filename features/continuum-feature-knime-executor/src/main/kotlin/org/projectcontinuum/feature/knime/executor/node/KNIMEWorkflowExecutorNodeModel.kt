@@ -2,6 +2,7 @@ package org.projectcontinuum.feature.knime.executor.node
 
 import org.projectcontinuum.core.commons.annotation.ContinuumNode
 import org.projectcontinuum.core.commons.context.ExecutionContext
+import org.projectcontinuum.core.commons.exception.CredentialsNotFoundException
 import org.projectcontinuum.core.commons.exception.NodeRuntimeException
 import org.projectcontinuum.core.commons.model.ContinuumWorkflowModel
 import org.projectcontinuum.core.commons.node.ProcessNodeModel
@@ -13,6 +14,8 @@ import org.projectcontinuum.core.commons.utils.NodeOutputWriter
 import org.projectcontinuum.feature.knime.executor.service.KNIMECliService
 import org.projectcontinuum.feature.knime.executor.config.KnimeExecutorProperties
 import org.projectcontinuum.feature.knime.executor.service.ProcessResult
+import org.projectcontinuum.feature.knime.executor.service.WorkflowCredential
+import org.projectcontinuum.feature.knime.executor.service.WorkflowVariable
 import org.slf4j.LoggerFactory
 import org.springframework.http.MediaType.TEXT_PLAIN_VALUE
 import org.springframework.web.util.UriUtils
@@ -41,6 +44,8 @@ class KNIMEWorkflowExecutorNodeModel(
     private const val STAGE_EXECUTE_WORKFLOW = "Execute Workflow"
     private const val STAGE_UPLOAD_RESULTS = "Upload Results"
     private const val STAGE_CLEANUP = "Cleanup"
+
+    private val WORKFLOW_VARIABLE_TYPES = setOf("String", "int", "double")
   }
 
   final override val inputPorts = emptyMap<String, ContinuumWorkflowModel.NodePort>()
@@ -79,6 +84,54 @@ class KNIMEWorkflowExecutorNodeModel(
             "title": "Reset Workflow Before Execution",
             "description": "Pass --reset to the KNIME batch executor to clear node outputs before running",
             "default": false
+          },
+          "workflowVariables": {
+            "type": "array",
+            "title": "Workflow Variables",
+            "description": "Variables passed to the workflow at runtime via NodePit's --variable flag. Configure matching Workflow Variables in KNIME first (right-click workflow -> Workflow Variables...)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "title": "Name"
+                },
+                "value": {
+                  "type": "string",
+                  "title": "Value"
+                },
+                "type": {
+                  "type": "string",
+                  "title": "Type",
+                  "enum": ["String", "int", "double"],
+                  "default": "String"
+                }
+              },
+              "required": ["name", "value", "type"]
+            },
+            "default": []
+          },
+          "workflowCredentials": {
+            "type": "array",
+            "title": "Workflow Credentials",
+            "description": "Login/password credentials injected into the workflow at runtime via NodePit's --credential flag. Configure a matching entry in KNIME first (right-click workflow -> Workflow Credentials...) - the Name below must exactly match the name configured there.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "knimeCredentialName": {
+                  "type": "string",
+                  "title": "KNIME Credential Name",
+                  "description": "Must exactly match the name configured in this workflow's own Workflow Credentials dialog in KNIME"
+                },
+                "credential": {
+                  "type": "string",
+                  "title": "Credential",
+                  "description": "Continuum stored credential providing the login and password to inject"
+                }
+              },
+              "required": ["knimeCredentialName", "credential"]
+            },
+            "default": []
           }
         },
         "required": ["workflowLocation", "executionUploadUrl"]
@@ -90,41 +143,54 @@ class KNIMEWorkflowExecutorNodeModel(
   val propertiesUiSchema: Map<String, Any> = objectMapper.readValue(
     """
       {
-        "type": "Categorization",
+        "type": "VerticalLayout",
         "elements": [
           {
-            "type": "Category",
-            "label": "Workflow Configuration",
-            "elements": [
-              {
-                "type": "Control",
-                "scope": "#/properties/workflowLocation",
-                "options": {
-                  "placeholder": "https://example.com/workflow.knwf or /path/to/workflow.knwf"
-                }
-              },
-              {
-                "type": "Control",
-                "scope": "#/properties/executionUploadUrl",
-                "options": {
-                  "placeholder": "https://example.com/api/v1/knime-workflows/{workflowId}/executions"
-                }
-              }
-            ]
+            "type": "Control",
+            "scope": "#/properties/workflowLocation",
+            "options": {
+              "placeholder": "https://example.com/workflow.knwf or /path/to/workflow.knwf"
+            }
           },
           {
-            "type": "Category",
-            "label": "Execution Settings",
-            "elements": [
-              {
-                "type": "Control",
-                "scope": "#/properties/timeoutSeconds"
-              },
-              {
-                "type": "Control",
-                "scope": "#/properties/resetWorkflow"
+            "type": "Control",
+            "scope": "#/properties/executionUploadUrl",
+            "options": {
+              "placeholder": "https://example.com/api/v1/knime-workflows/{workflowId}/executions"
+            }
+          },
+          {
+            "type": "Control",
+            "scope": "#/properties/timeoutSeconds"
+          },
+          {
+            "type": "Control",
+            "scope": "#/properties/resetWorkflow"
+          },
+          {
+            "type": "Control",
+            "scope": "#/properties/workflowVariables",
+            "options": {
+              "showSortButtons": true
+            }
+          },
+          {
+            "type": "Control",
+            "scope": "#/properties/workflowCredentials",
+            "options": {
+              "showSortButtons": true,
+              "detail": {
+                "type": "VerticalLayout",
+                "elements": [
+                  { "type": "Control", "scope": "#/properties/knimeCredentialName" },
+                  {
+                    "type": "Control",
+                    "scope": "#/properties/credential",
+                    "options": { "format": "credential", "credentialType": "GENERIC" }
+                  }
+                ]
               }
-            ]
+            }
           }
         ]
       }
@@ -149,7 +215,9 @@ class KNIMEWorkflowExecutorNodeModel(
       "workflowLocation" to "",
       "executionUploadUrl" to "",
       "timeoutSeconds" to 300,
-      "resetWorkflow" to false
+      "resetWorkflow" to false,
+      "workflowVariables" to emptyList<Map<String, Any>>(),
+      "workflowCredentials" to emptyList<Map<String, Any>>()
     ),
     propertiesSchema = propertiesSchema,
     propertiesUISchema = propertiesUiSchema
@@ -200,6 +268,7 @@ class KNIMEWorkflowExecutorNodeModel(
 
       val workflowLocation = properties?.get("workflowLocation") as? String
         ?: throw NodeRuntimeException(
+          isRetriable = false,
           workflowId = "",
           nodeId = "",
           message = "workflowLocation property is required"
@@ -207,6 +276,7 @@ class KNIMEWorkflowExecutorNodeModel(
 
       val executionUploadUrl = (properties["executionUploadUrl"] as? String)?.trim()?.takeIf { it.isNotBlank() }
         ?: throw NodeRuntimeException(
+          isRetriable = false,
           workflowId = "",
           nodeId = "",
           message = "executionUploadUrl property is required"
@@ -233,6 +303,20 @@ class KNIMEWorkflowExecutorNodeModel(
 
       val timeoutSeconds = (properties["timeoutSeconds"] as? Number)?.toInt() ?: 300
       val resetWorkflow = properties["resetWorkflow"] as? Boolean ?: false
+      val workflowVariables = parseWorkflowVariables(properties["workflowVariables"])
+      val workflowCredentialRefs = parseWorkflowCredentialRefs(properties["workflowCredentials"])
+      val workflowCredentials = workflowCredentialRefs.map { ref ->
+        val data = try {
+          executionContext.getCredential<Map<String, Any>>(ref.credential)
+        } catch (e: CredentialsNotFoundException) {
+          throw NodeRuntimeException(
+            workflowId = "",
+            nodeId = "",
+            message = "Could not resolve credential '${ref.credential}' for workflow credential '${ref.knimeCredentialName}'"
+          )
+        }
+        WorkflowCredential(name = ref.knimeCredentialName, login = data["login"]?.toString(), password = data["password"]?.toString())
+      }
 
       if (timeoutSeconds < 10) {
         throw NodeRuntimeException(
@@ -299,7 +383,9 @@ class KNIMEWorkflowExecutorNodeModel(
             workflowPath = executionWorkflowPath,
             workspaceDir = tempDir.absolutePath,
             timeoutSeconds = timeoutSeconds,
-            reset = resetWorkflow
+            reset = resetWorkflow,
+            variables = workflowVariables,
+            credentials = workflowCredentials
           )
         } catch (e: Exception) {
           // The KNIME process can throw instead of returning a non-zero exit code (e.g. it times
@@ -426,6 +512,107 @@ class KNIMEWorkflowExecutorNodeModel(
         message = "Unexpected error: ${e.message}"
       )
     }
+  }
+
+  /**
+   * NodePit's --variable flag uses ';' to separate name/value/type, so none of the three may
+   * contain it or the flag would be misparsed on the KNIME side.
+   */
+  internal fun parseWorkflowVariables(rawVariables: Any?): List<WorkflowVariable> {
+    val entries = rawVariables as? List<*> ?: return emptyList()
+
+    return entries.map { entry ->
+      val entryMap = entry as? Map<*, *>
+        ?: throw NodeRuntimeException(
+          workflowId = "",
+          nodeId = "",
+          message = "Each workflow variable must be an object with name, value, and type"
+        )
+
+      val name = (entryMap["name"] as? String)?.trim()?.takeIf { it.isNotBlank() }
+        ?: throw NodeRuntimeException(
+          workflowId = "",
+          nodeId = "",
+          message = "Each workflow variable requires a non-blank name"
+        )
+      val value = entryMap["value"]?.toString() ?: ""
+      val type = (entryMap["type"] as? String)?.trim()?.takeIf { it.isNotBlank() }
+        ?: throw NodeRuntimeException(
+          workflowId = "",
+          nodeId = "",
+          message = "Workflow variable '$name' requires a type"
+        )
+
+      if (type !in WORKFLOW_VARIABLE_TYPES) {
+        throw NodeRuntimeException(
+          workflowId = "",
+          nodeId = "",
+          message = "Workflow variable '$name' has invalid type '$type' - must be one of ${WORKFLOW_VARIABLE_TYPES.joinToString(", ")}"
+        )
+      }
+      if (name.contains(";") || value.contains(";") || type.contains(";")) {
+        throw NodeRuntimeException(
+          workflowId = "",
+          nodeId = "",
+          message = "Workflow variable '$name' cannot contain ';' (NodePit uses ';' as the field separator)"
+        )
+      }
+
+      WorkflowVariable(name = name, value = value, type = type)
+    }
+  }
+
+  internal data class WorkflowCredentialRef(val knimeCredentialName: String, val credential: String)
+
+  /**
+   * NodePit's --credential flag uses ';' to separate name/login/password, so the KNIME
+   * credential name may not contain it or the flag would be misparsed on the KNIME side.
+   */
+  internal fun parseWorkflowCredentialRefs(raw: Any?): List<WorkflowCredentialRef> {
+    val entries = raw as? List<*> ?: return emptyList()
+
+    val refs = entries.map { entry ->
+      val entryMap = entry as? Map<*, *>
+        ?: throw NodeRuntimeException(
+          workflowId = "",
+          nodeId = "",
+          message = "Each workflow credential must be an object with knimeCredentialName and credential"
+        )
+
+      val knimeCredentialName = (entryMap["knimeCredentialName"] as? String)?.trim()?.takeIf { it.isNotBlank() }
+        ?: throw NodeRuntimeException(
+          workflowId = "",
+          nodeId = "",
+          message = "Each workflow credential requires a non-blank knimeCredentialName"
+        )
+      val credential = (entryMap["credential"] as? String)?.trim()?.takeIf { it.isNotBlank() }
+        ?: throw NodeRuntimeException(
+          workflowId = "",
+          nodeId = "",
+          message = "Workflow credential '$knimeCredentialName' requires a non-blank credential"
+        )
+
+      if (knimeCredentialName.contains(";")) {
+        throw NodeRuntimeException(
+          workflowId = "",
+          nodeId = "",
+          message = "Workflow credential name '$knimeCredentialName' cannot contain ';' (NodePit uses ';' as the field separator)"
+        )
+      }
+
+      WorkflowCredentialRef(knimeCredentialName = knimeCredentialName, credential = credential)
+    }
+
+    val duplicateNames = refs.groupingBy { it.knimeCredentialName }.eachCount().filterValues { it > 1 }.keys
+    if (duplicateNames.isNotEmpty()) {
+      throw NodeRuntimeException(
+        workflowId = "",
+        nodeId = "",
+        message = "Duplicate workflow credential name(s): ${duplicateNames.joinToString(", ")}"
+      )
+    }
+
+    return refs
   }
 
   internal fun determineDestinationName(location: String): String {

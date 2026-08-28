@@ -3,14 +3,18 @@ package org.projectcontinuum.feature.knime.executor.node
 import com.sun.net.httpserver.HttpServer
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.projectcontinuum.core.commons.context.CredentialFetcher
 import org.projectcontinuum.core.commons.context.ExecutionContext
 import org.projectcontinuum.core.commons.exception.NodeRuntimeException
 import org.projectcontinuum.feature.knime.executor.config.KnimeExecutorProperties
 import org.projectcontinuum.feature.knime.executor.service.KNIMECliService
 import org.projectcontinuum.feature.knime.executor.service.ProcessResult
+import org.projectcontinuum.feature.knime.executor.service.WorkflowCredential
+import org.projectcontinuum.feature.knime.executor.service.WorkflowVariable
 import tools.jackson.databind.ObjectMapper
 import java.io.File
 import java.net.InetSocketAddress
@@ -194,7 +198,7 @@ class KNIMEWorkflowExecutorNodeModelTest {
 
   @Test
   fun `execute uploads a FAILED status before throwing when the KNIME process exits non-zero`() {
-    every { knimeCliService.executeWorkflow(any(), any(), any(), any()) } returns
+    every { knimeCliService.executeWorkflow(any(), any(), any(), any(), any(), any()) } returns
       ProcessResult(exitCode = 1, stdout = "", stderr = "boom")
 
     val sourceWorkflow = File.createTempFile("knime-workflow", ".knwf")
@@ -224,7 +228,7 @@ class KNIMEWorkflowExecutorNodeModelTest {
 
   @Test
   fun `execute still uploads a FAILED status when the KNIME process throws instead of exiting non-zero`() {
-    every { knimeCliService.executeWorkflow(any(), any(), any(), any()) } throws
+    every { knimeCliService.executeWorkflow(any(), any(), any(), any(), any(), any()) } throws
       RuntimeException("KNIME workflow execution timed out after 300 seconds")
 
     val sourceWorkflow = File.createTempFile("knime-workflow", ".knwf")
@@ -247,6 +251,270 @@ class KNIMEWorkflowExecutorNodeModelTest {
 
       assertEquals(false, thrown.isRetriable)
       assertTrue(String(receivedUploadBody!!).contains("FAILED"))
+    } finally {
+      sourceWorkflow.delete()
+    }
+  }
+
+  @Test
+  fun `execute forwards parsed workflow variables to knimeCliService`() {
+    val variablesSlot = slot<List<WorkflowVariable>>()
+    every {
+      knimeCliService.executeWorkflow(any(), any(), any(), any(), capture(variablesSlot), any())
+    } returns ProcessResult(exitCode = 0, stdout = "", stderr = "")
+
+    val sourceWorkflow = File.createTempFile("knime-workflow", ".knwf")
+    try {
+      sourceWorkflow.writeBytes("dummy".toByteArray())
+      val properties = mapOf(
+        "workflowLocation" to sourceWorkflow.absolutePath,
+        "executionUploadUrl" to "http://localhost:${server.address.port}/upload",
+        "workflowVariables" to listOf(
+          mapOf("name" to "myVar", "value" to "42", "type" to "int")
+        )
+      )
+
+      nodeModel.execute(
+        properties,
+        emptyMap(),
+        mockk(relaxed = true),
+        mockk(relaxed = true),
+        ExecutionContext()
+      )
+
+      assertEquals(listOf(WorkflowVariable("myVar", "42", "int")), variablesSlot.captured)
+    } finally {
+      sourceWorkflow.delete()
+    }
+  }
+
+  @Test
+  fun `parseWorkflowVariables returns an empty list when the property is absent`() {
+    assertEquals(emptyList(), nodeModel.parseWorkflowVariables(null))
+  }
+
+  @Test
+  fun `parseWorkflowVariables maps valid entries into WorkflowVariable`() {
+    val result = nodeModel.parseWorkflowVariables(
+      listOf(
+        mapOf("name" to "count", "value" to "3", "type" to "int"),
+        mapOf("name" to "label", "value" to "hello", "type" to "String")
+      )
+    )
+
+    assertEquals(
+      listOf(
+        WorkflowVariable("count", "3", "int"),
+        WorkflowVariable("label", "hello", "String")
+      ),
+      result
+    )
+  }
+
+  @Test
+  fun `parseWorkflowVariables throws when type is not String, int, or double`() {
+    assertFailsWith<NodeRuntimeException> {
+      nodeModel.parseWorkflowVariables(listOf(mapOf("name" to "x", "value" to "1", "type" to "boolean")))
+    }
+  }
+
+  @Test
+  fun `parseWorkflowVariables throws when name is blank`() {
+    assertFailsWith<NodeRuntimeException> {
+      nodeModel.parseWorkflowVariables(listOf(mapOf("name" to "  ", "value" to "1", "type" to "String")))
+    }
+  }
+
+  @Test
+  fun `parseWorkflowVariables throws when a value contains a semicolon`() {
+    assertFailsWith<NodeRuntimeException> {
+      nodeModel.parseWorkflowVariables(listOf(mapOf("name" to "x", "value" to "a;b", "type" to "String")))
+    }
+  }
+
+  @Test
+  fun `parseWorkflowCredentialRefs returns an empty list when the property is absent`() {
+    assertEquals(emptyList(), nodeModel.parseWorkflowCredentialRefs(null))
+  }
+
+  @Test
+  fun `parseWorkflowCredentialRefs maps valid entries into WorkflowCredentialRef`() {
+    val result = nodeModel.parseWorkflowCredentialRefs(
+      listOf(
+        mapOf("knimeCredentialName" to "dbCred", "credential" to "my-db-credential"),
+        mapOf("knimeCredentialName" to "apiCred", "credential" to "my-api-credential")
+      )
+    )
+
+    assertEquals(
+      listOf(
+        KNIMEWorkflowExecutorNodeModel.WorkflowCredentialRef("dbCred", "my-db-credential"),
+        KNIMEWorkflowExecutorNodeModel.WorkflowCredentialRef("apiCred", "my-api-credential")
+      ),
+      result
+    )
+  }
+
+  @Test
+  fun `parseWorkflowCredentialRefs throws when an entry is not an object`() {
+    assertFailsWith<NodeRuntimeException> {
+      nodeModel.parseWorkflowCredentialRefs(listOf("not-an-object"))
+    }
+  }
+
+  @Test
+  fun `parseWorkflowCredentialRefs throws when knimeCredentialName is blank`() {
+    assertFailsWith<NodeRuntimeException> {
+      nodeModel.parseWorkflowCredentialRefs(listOf(mapOf("knimeCredentialName" to "  ", "credential" to "my-db-credential")))
+    }
+  }
+
+  @Test
+  fun `parseWorkflowCredentialRefs throws when credential is missing`() {
+    assertFailsWith<NodeRuntimeException> {
+      nodeModel.parseWorkflowCredentialRefs(listOf(mapOf("knimeCredentialName" to "dbCred")))
+    }
+  }
+
+  @Test
+  fun `parseWorkflowCredentialRefs throws when knimeCredentialName contains a semicolon`() {
+    assertFailsWith<NodeRuntimeException> {
+      nodeModel.parseWorkflowCredentialRefs(listOf(mapOf("knimeCredentialName" to "db;Cred", "credential" to "my-db-credential")))
+    }
+  }
+
+  @Test
+  fun `parseWorkflowCredentialRefs throws on duplicate knimeCredentialName values`() {
+    assertFailsWith<NodeRuntimeException> {
+      nodeModel.parseWorkflowCredentialRefs(
+        listOf(
+          mapOf("knimeCredentialName" to "dbCred", "credential" to "cred-a"),
+          mapOf("knimeCredentialName" to "dbCred", "credential" to "cred-b")
+        )
+      )
+    }
+  }
+
+  @Test
+  fun `execute resolves workflow credentials and forwards them to knimeCliService`() {
+    val credentialsSlot = slot<List<WorkflowCredential>>()
+    every {
+      knimeCliService.executeWorkflow(any(), any(), any(), any(), any(), capture(credentialsSlot))
+    } returns ProcessResult(exitCode = 0, stdout = "", stderr = "")
+
+    val fakeStore = mapOf("my-db-credential" to mapOf("login" to "alice", "password" to "s3cret"))
+    val sourceWorkflow = File.createTempFile("knime-workflow", ".knwf")
+    try {
+      sourceWorkflow.writeBytes("dummy".toByteArray())
+      val properties = mapOf(
+        "workflowLocation" to sourceWorkflow.absolutePath,
+        "executionUploadUrl" to "http://localhost:${server.address.port}/upload",
+        "workflowCredentials" to listOf(
+          mapOf("knimeCredentialName" to "dbCred", "credential" to "my-db-credential")
+        )
+      )
+
+      nodeModel.execute(
+        properties,
+        emptyMap(),
+        mockk(relaxed = true),
+        mockk(relaxed = true),
+        ExecutionContext(credentialFetcher = CredentialFetcher { name -> fakeStore[name] })
+      )
+
+      assertEquals(listOf(WorkflowCredential("dbCred", "alice", "s3cret")), credentialsSlot.captured)
+    } finally {
+      sourceWorkflow.delete()
+    }
+  }
+
+  @Test
+  fun `execute leaves password null when the resolved credential data has only a login`() {
+    val credentialsSlot = slot<List<WorkflowCredential>>()
+    every {
+      knimeCliService.executeWorkflow(any(), any(), any(), any(), any(), capture(credentialsSlot))
+    } returns ProcessResult(exitCode = 0, stdout = "", stderr = "")
+
+    val fakeStore = mapOf("my-db-credential" to mapOf("login" to "alice"))
+    val sourceWorkflow = File.createTempFile("knime-workflow", ".knwf")
+    try {
+      sourceWorkflow.writeBytes("dummy".toByteArray())
+      val properties = mapOf(
+        "workflowLocation" to sourceWorkflow.absolutePath,
+        "executionUploadUrl" to "http://localhost:${server.address.port}/upload",
+        "workflowCredentials" to listOf(
+          mapOf("knimeCredentialName" to "dbCred", "credential" to "my-db-credential")
+        )
+      )
+
+      nodeModel.execute(
+        properties,
+        emptyMap(),
+        mockk(relaxed = true),
+        mockk(relaxed = true),
+        ExecutionContext(credentialFetcher = CredentialFetcher { name -> fakeStore[name] })
+      )
+
+      assertEquals(listOf(WorkflowCredential("dbCred", "alice", null)), credentialsSlot.captured)
+    } finally {
+      sourceWorkflow.delete()
+    }
+  }
+
+  @Test
+  fun `execute calls through with an empty credentials list when workflowCredentials is absent`() {
+    val credentialsSlot = slot<List<WorkflowCredential>>()
+    every {
+      knimeCliService.executeWorkflow(any(), any(), any(), any(), any(), capture(credentialsSlot))
+    } returns ProcessResult(exitCode = 0, stdout = "", stderr = "")
+
+    val sourceWorkflow = File.createTempFile("knime-workflow", ".knwf")
+    try {
+      sourceWorkflow.writeBytes("dummy".toByteArray())
+      val properties = mapOf(
+        "workflowLocation" to sourceWorkflow.absolutePath,
+        "executionUploadUrl" to "http://localhost:${server.address.port}/upload"
+      )
+
+      nodeModel.execute(
+        properties,
+        emptyMap(),
+        mockk(relaxed = true),
+        mockk(relaxed = true),
+        ExecutionContext()
+      )
+
+      assertEquals(emptyList(), credentialsSlot.captured)
+    } finally {
+      sourceWorkflow.delete()
+    }
+  }
+
+  @Test
+  fun `execute throws a NodeRuntimeException naming both credential identifiers when the stored credential cannot be resolved`() {
+    val sourceWorkflow = File.createTempFile("knime-workflow", ".knwf")
+    try {
+      sourceWorkflow.writeBytes("dummy".toByteArray())
+      val properties = mapOf(
+        "workflowLocation" to sourceWorkflow.absolutePath,
+        "executionUploadUrl" to "http://localhost:${server.address.port}/upload",
+        "workflowCredentials" to listOf(
+          mapOf("knimeCredentialName" to "dbCred", "credential" to "missing-credential")
+        )
+      )
+
+      val thrown = assertFailsWith<NodeRuntimeException> {
+        nodeModel.execute(
+          properties,
+          emptyMap(),
+          mockk(relaxed = true),
+          mockk(relaxed = true),
+          ExecutionContext(credentialFetcher = CredentialFetcher { null })
+        )
+      }
+
+      assertTrue(thrown.message!!.contains("missing-credential"))
+      assertTrue(thrown.message!!.contains("dbCred"))
     } finally {
       sourceWorkflow.delete()
     }

@@ -179,4 +179,135 @@ class KNIMECliServiceTest {
       tempDir.deleteRecursively()
     }
   }
+
+  @Test
+  fun `buildCommand includes a quoted --variable flag per workflow variable`() {
+    val command = knimeCliService.buildCommand(
+      workflowPath = "/tmp/workflow.knwf",
+      workspaceDir = "/tmp/workspace",
+      reset = false,
+      variables = listOf(
+        WorkflowVariable(name = "count", value = "3", type = "int"),
+        WorkflowVariable(name = "label", value = "hello world", type = "String")
+      )
+    )
+
+    assertTrue(command.contains("--variable='count;3;int'"))
+    assertTrue(command.contains("--variable='label;hello world;String'"))
+  }
+
+  @Test
+  fun `buildCommand safely escapes a single quote in a workflow variable value`() {
+    val command = knimeCliService.buildCommand(
+      workflowPath = "/tmp/workflow.knwf",
+      workspaceDir = "/tmp/workspace",
+      reset = false,
+      variables = listOf(WorkflowVariable(name = "injected", value = "x'; rm -rf ~; '", type = "String"))
+    )
+
+    assertTrue(command.contains("--variable='injected;x'\\''; rm -rf ~; '\\'';String'"))
+  }
+
+  @Test
+  fun `buildCommand omits --variable flags when no workflow variables are given`() {
+    val command = knimeCliService.buildCommand(
+      workflowPath = "/tmp/workflow.knwf",
+      workspaceDir = "/tmp/workspace",
+      reset = false
+    )
+
+    assertTrue(!command.contains("--variable"))
+  }
+
+  @Test
+  fun `buildCommand omits --credential flags when no workflow credentials are given`() {
+    val command = knimeCliService.buildCommand(
+      workflowPath = "/tmp/workflow.knwf",
+      workspaceDir = "/tmp/workspace",
+      reset = false
+    )
+
+    assertTrue(!command.contains("--credential"))
+  }
+
+  @Test
+  fun `buildCommand includes a name-only --credential flag when login and password are absent`() {
+    val command = knimeCliService.buildCommand(
+      workflowPath = "/tmp/workflow.knwf",
+      workspaceDir = "/tmp/workspace",
+      reset = false,
+      credentials = listOf(WorkflowCredential(name = "dbCred"))
+    )
+
+    assertTrue(command.contains("--credential='dbCred'"))
+  }
+
+  @Test
+  fun `buildCommand includes a name-login --credential flag when only login is present`() {
+    val command = knimeCliService.buildCommand(
+      workflowPath = "/tmp/workflow.knwf",
+      workspaceDir = "/tmp/workspace",
+      reset = false,
+      credentials = listOf(WorkflowCredential(name = "dbCred", login = "alice"))
+    )
+
+    assertTrue(command.contains("--credential='dbCred;alice'"))
+  }
+
+  @Test
+  fun `buildCommand includes a name-login-password --credential flag when both are present`() {
+    val command = knimeCliService.buildCommand(
+      workflowPath = "/tmp/workflow.knwf",
+      workspaceDir = "/tmp/workspace",
+      reset = false,
+      credentials = listOf(WorkflowCredential(name = "dbCred", login = "alice", password = "s3cret"))
+    )
+
+    assertTrue(command.contains("--credential='dbCred;alice;s3cret'"))
+  }
+
+  @Test
+  fun `buildCommand includes one --credential flag per entry in order`() {
+    val command = knimeCliService.buildCommand(
+      workflowPath = "/tmp/workflow.knwf",
+      workspaceDir = "/tmp/workspace",
+      reset = false,
+      credentials = listOf(
+        WorkflowCredential(name = "first", login = "alice", password = "s3cret"),
+        WorkflowCredential(name = "second", login = "bob")
+      )
+    )
+
+    val firstIndex = command.indexOf("--credential='first;alice;s3cret'")
+    val secondIndex = command.indexOf("--credential='second;bob'")
+    assertTrue(firstIndex >= 0)
+    assertTrue(secondIndex > firstIndex)
+  }
+
+  @Test
+  fun `buildCommand safely escapes a single quote in a workflow credential login or password`() {
+    val command = knimeCliService.buildCommand(
+      workflowPath = "/tmp/workflow.knwf",
+      workspaceDir = "/tmp/workspace",
+      reset = false,
+      credentials = listOf(WorkflowCredential(name = "dbCred", login = "x'; rm -rf ~; '", password = "p'\"w"))
+    )
+
+    assertTrue(command.contains("--credential='dbCred;x'\\''; rm -rf ~; '\\'';p'\\''\"w'"))
+  }
+
+  @Test
+  fun `buildCommand includes both --variable and --credential flags together with reset`() {
+    val command = knimeCliService.buildCommand(
+      workflowPath = "/tmp/workflow.knwf",
+      workspaceDir = "/tmp/workspace",
+      reset = true,
+      variables = listOf(WorkflowVariable(name = "count", value = "3", type = "int")),
+      credentials = listOf(WorkflowCredential(name = "dbCred", login = "alice", password = "s3cret"))
+    )
+
+    assertTrue(command.contains("--variable='count;3;int'"))
+    assertTrue(command.contains("--credential='dbCred;alice;s3cret'"))
+    assertTrue(command.contains("--reset"))
+  }
 }
