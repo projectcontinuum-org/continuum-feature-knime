@@ -1,0 +1,25 @@
+# ============================================================
+# Development overrides for continuum-feature-knime
+# Usage: helm install continuum-feature-knime ./charts/continuum-feature-knime -f charts/continuum-feature-knime/values-dev.yaml -n continuum-dev --create-namespace
+# ============================================================
+
+global:
+  imagePullPolicy: Always
+
+continuum:
+  secrets:
+    minio:
+      rootUser: "dev-minio-root"
+      rootPassword: "dev-minio-secret"
+
+  featureKnime:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+    autoscaling:
+      enabled: false
