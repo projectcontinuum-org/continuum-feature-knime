@@ -1,0 +1,26 @@
+{{- if and .Values.continuum.featureKnime.enabled .Values.continuum.featureKnime.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "continuum-feature-knime.fullname" . }}
+  labels:
+    {{- include "continuum-feature-knime.componentLabels" (dict "context" $ "component" "feature-knime" "extra" .Values.continuum.featureKnime.labels.hpa) | nindent 4 }}
+  {{- with (include "continuum-feature-knime.componentAnnotations" (dict "context" $ "extra" .Values.continuum.featureKnime.annotations.hpa)) }}
+  annotations:
+    {{- nindent 4 . }}
+  {{- end }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "continuum-feature-knime.fullname" . }}
+  minReplicas: {{ .Values.continuum.featureKnime.autoscaling.minReplicas | default 1 }}
+  maxReplicas: {{ .Values.continuum.featureKnime.autoscaling.maxReplicas | default 5 }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.continuum.featureKnime.autoscaling.targetCPUUtilizationPercentage | default 75 }}
+{{- end }}
