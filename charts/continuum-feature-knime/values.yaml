@@ -101,7 +101,7 @@ continuum:
   featureKnime:
     enabled: true
     image:
-      repository: ghcr.io/projectcontinuum/continuum-feature-knime/worker
+      repository: projectcontinuum/continuum-feature-knime
       tag: ""                      # defaults to .Chart.AppVersion if unset
       pullPolicy: IfNotPresent
     replicas: 1
