@@ -17,3 +17,9 @@ dependencies {
     // Feature node modules (local project)
     implementation(project(":features:continuum-feature-knime-executor"))
 }
+
+jib {
+    to {
+        image = "projectcontinuum/continuum-feature-knime:${project.version}"
+    }
+}
