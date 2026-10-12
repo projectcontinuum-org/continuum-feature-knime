@@ -1,0 +1,146 @@
+{{- if .Values.continuum.scheduler.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "continuum-feature-knime.scheduler.fullname" . }}
+  labels:
+    {{- include "continuum-feature-knime.componentLabels" (dict "context" $ "component" "scheduler" "extra" .Values.continuum.scheduler.labels.deployment) | nindent 4 }}
+  {{- with (include "continuum-feature-knime.componentAnnotations" (dict "context" $ "extra" .Values.continuum.scheduler.annotations.deployment)) }}
+  annotations:
+    {{- nindent 4 . }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.continuum.scheduler.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: scheduler
+      {{- include "continuum-feature-knime.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "continuum-feature-knime.componentLabels" (dict "context" $ "component" "scheduler" "extra" .Values.continuum.scheduler.labels.pod) | nindent 8 }}
+      {{- with (include "continuum-feature-knime.componentAnnotations" (dict "context" $ "extra" .Values.continuum.scheduler.annotations.pod)) }}
+      annotations:
+        {{- nindent 8 . }}
+      {{- end }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-for-postgresql
+          image: "{{ .Values.global.initContainer.image.repository }}:{{ .Values.global.initContainer.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy | default "IfNotPresent" }}
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ .Values.continuum.infra.postgresql.host }} {{ .Values.continuum.infra.postgresql.port }}; do
+                echo "Waiting for PostgreSQL..."; sleep 5;
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+        - name: wait-for-minio
+          image: "{{ .Values.global.initContainer.image.repository }}:{{ .Values.global.initContainer.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy | default "IfNotPresent" }}
+          command:
+            - sh
+            - -c
+            - |
+              MINIO_HOST=$(echo "{{ .Values.continuum.infra.minio.endpoint }}" | sed 's|http[s]*://||' | cut -d: -f1)
+              MINIO_PORT=$(echo "{{ .Values.continuum.infra.minio.endpoint }}" | sed 's|http[s]*://||' | cut -d: -f2)
+              MINIO_PORT=${MINIO_PORT:-9000}
+              until nc -z $MINIO_HOST $MINIO_PORT; do
+                echo "Waiting for MinIO..."; sleep 5;
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      containers:
+        - name: scheduler
+          image: "{{ .Values.continuum.scheduler.image.repository }}:{{ .Values.continuum.scheduler.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - containerPort: 8084
+              name: http
+              protocol: TCP
+          env:
+            - name: CONTINUUM_DB_URL
+              value: {{ include "continuum-feature-knime.infra.db.url" . | quote }}
+            - name: CONTINUUM_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "continuum-feature-knime.postgresql.secretName" . }}
+                  key: username
+            - name: CONTINUUM_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "continuum-feature-knime.postgresql.secretName" . }}
+                  key: password
+            - name: CONTINUUM_API_SERVER_URL
+              value: {{ .Values.continuum.scheduler.apiServerBaseUrl | quote }}
+            - name: CONTINUUM_CREDENTIALS_SERVER_URL
+              value: {{ .Values.continuum.scheduler.credentialsServerBaseUrl | quote }}
+            - name: CONTINUUM_KNIME_SCHEDULER_PUBLIC_URL
+              value: {{ .Values.continuum.scheduler.publicBaseUrl | quote }}
+            - name: CONTINUUM_STORAGE_TYPE
+              value: {{ .Values.continuum.scheduler.storage.type | quote }}
+            - name: CONTINUUM_KNIME_WORKFLOW_BUCKET_NAME
+              value: {{ .Values.continuum.scheduler.storage.bucketName | quote }}
+            - name: CONTINUUM_KNIME_WORKFLOW_BUCKET_REGION
+              value: {{ .Values.continuum.scheduler.storage.bucketRegion | quote }}
+            - name: CONTINUUM_MINIO_ENDPOINT
+              value: {{ .Values.continuum.infra.minio.endpoint | quote }}
+            - name: CONTINUUM_MINIO_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "continuum-feature-knime.minio.secretName" . }}
+                  key: root-user
+            - name: CONTINUUM_MINIO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "continuum-feature-knime.minio.secretName" . }}
+                  key: root-password
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.continuum.scheduler.resources | nindent 12 }}
+      {{- with (.Values.continuum.scheduler.nodeSelector | default .Values.global.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (.Values.continuum.scheduler.tolerations | default .Values.global.tolerations) }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
