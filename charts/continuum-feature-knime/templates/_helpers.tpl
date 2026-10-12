@@ -77,6 +77,16 @@ annotations:
 {{- .Values.continuum.infra.temporal.host -}}:{{- .Values.continuum.infra.temporal.port -}}
 {{- end }}
 
+{{- define "continuum-feature-knime.infra.db.url" -}}
+jdbc:postgresql://{{ .Values.continuum.infra.postgresql.host }}:{{ .Values.continuum.infra.postgresql.port }}/{{ .Values.continuum.infra.postgresql.database }}
+{{- end }}
+
+{{/* ======================== Component fullnames ======================== */}}
+
+{{- define "continuum-feature-knime.scheduler.fullname" -}}
+{{- include "continuum-feature-knime.fullname" . -}}-scheduler
+{{- end }}
+
 {{/* ======================== Secret names ======================== */}}
 
 {{- define "continuum-feature-knime.minio.secretName" -}}
@@ -84,5 +94,13 @@ annotations:
 {{- .Values.continuum.secrets.existingMinioSecret -}}
 {{- else -}}
 {{- include "continuum-feature-knime.fullname" . -}}-minio-secret
+{{- end -}}
+{{- end }}
+
+{{- define "continuum-feature-knime.postgresql.secretName" -}}
+{{- if .Values.continuum.secrets.existingPostgresqlSecret -}}
+{{- .Values.continuum.secrets.existingPostgresqlSecret -}}
+{{- else -}}
+{{- include "continuum-feature-knime.fullname" . -}}-postgresql-secret
 {{- end -}}
 {{- end }}

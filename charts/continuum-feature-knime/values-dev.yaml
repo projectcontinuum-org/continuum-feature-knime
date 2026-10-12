@@ -11,6 +11,9 @@ continuum:
     minio:
       rootUser: "dev-minio-root"
       rootPassword: "dev-minio-secret"
+    postgresql:
+      username: "continuum_owner"
+      password: "continuum-test-password"
 
   featureKnime:
     replicas: 1
@@ -23,3 +26,14 @@ continuum:
         memory: 2Gi
     autoscaling:
       enabled: false
+
+  scheduler:
+    replicas: 1
+    publicBaseUrl: "http://localhost:8084"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
