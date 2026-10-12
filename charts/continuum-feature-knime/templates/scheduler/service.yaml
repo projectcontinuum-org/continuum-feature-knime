@@ -1,0 +1,22 @@
+{{- if .Values.continuum.scheduler.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "continuum-feature-knime.scheduler.fullname" . }}
+  labels:
+    {{- include "continuum-feature-knime.componentLabels" (dict "context" $ "component" "scheduler" "extra" .Values.continuum.scheduler.labels.service) | nindent 4 }}
+  {{- with (include "continuum-feature-knime.componentAnnotations" (dict "context" $ "extra" .Values.continuum.scheduler.annotations.service)) }}
+  annotations:
+    {{- nindent 4 . }}
+  {{- end }}
+spec:
+  type: {{ .Values.continuum.scheduler.service.type | default "ClusterIP" }}
+  ports:
+    - port: {{ .Values.continuum.scheduler.service.port | default 8084 }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/component: scheduler
+    {{- include "continuum-feature-knime.selectorLabels" . | nindent 4 }}
+{{- end }}

@@ -49,6 +49,11 @@ continuum:
       url: "http://continuum-infra-schema-registry:8080"
     minio:
       endpoint: "http://continuum-infra-minio:9000"
+    # Only required if continuum.scheduler.enabled is true.
+    postgresql:
+      host: continuum-infra-postgresql
+      port: 5432
+      database: continuum
 
   # ============================================================
   # MinIO credentials.
@@ -71,6 +76,14 @@ continuum:
     minio:
       rootUser: ""
       rootPassword: ""
+    # Only required if continuum.scheduler.enabled is true. Same pattern as
+    # existingMinioSecret above — point at continuum-platform's own Postgres
+    # secret (named "<continuum-platform-release-name>-postgresql-secret")
+    # rather than let this chart duplicate/diverge from those credentials.
+    existingPostgresqlSecret: "continuum-platform-postgresql-secret"
+    postgresql:
+      username: ""
+      password: ""
 
   # ============================================================
   # continuum-api-server reachability.
@@ -132,3 +145,48 @@ continuum:
       pod: {}
       pvc: {}
       hpa: {}
+
+  # ============================================================
+  # continuum-knime-scheduler — object-store CRUD proxy + Temporal-schedule
+  # orchestration for user-uploaded .knwf files (REST service + embedded UI).
+  # ============================================================
+  scheduler:
+    enabled: true
+    image:
+      repository: projectcontinuum/continuum-knime-scheduler
+      tag: ""                      # defaults to .Chart.AppVersion if unset
+      pullPolicy: IfNotPresent
+    replicas: 1
+    service:
+      type: ClusterIP
+      port: 8084
+    # continuum-credentials-server and continuum-api-server reachability —
+    # same host:port shape as continuum.apiServer above, since this chart has
+    # no visibility into continuum-platform's internal Helm fullname either.
+    apiServerBaseUrl: "http://continuum-platform-api-server:8080"
+    credentialsServerBaseUrl: "http://continuum-platform-credentials-server:8080"
+    # Public URL the scheduler's own node points executions back at — must be
+    # externally reachable (via continuum-cloud-gateway), not cluster-local.
+    publicBaseUrl: ""
+    storage:
+      type: minio
+      bucketName: continuum-knime-workflows
+      bucketRegion: us-east-2
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    labels:
+      deployment: {}
+      pod: {}
+      service: {}
+    annotations:
+      deployment: {}
+      pod: {}
+      service: {}
