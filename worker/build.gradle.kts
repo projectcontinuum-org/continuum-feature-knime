@@ -11,6 +11,7 @@ val continuumPlatformVersion = property("continuumPlatformVersion").toString()
 
 continuum {
     continuumVersion.set(continuumPlatformVersion)
+    jibToImage.set("projectcontinuum/continuum-feature-knime:${project.version}")
 }
 
 dependencies {
