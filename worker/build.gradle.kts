@@ -11,7 +11,7 @@ val continuumPlatformVersion = property("continuumPlatformVersion").toString()
 
 continuum {
     continuumVersion.set(continuumPlatformVersion)
-    jibFromImage.set("knime/knime:r-5.11.0-642")
+    jibFromImage.set("knime/knime-full:r-5.5.3-414")
     jibToImage.set("projectcontinuum/continuum-feature-knime:${project.version}")
 }
 
