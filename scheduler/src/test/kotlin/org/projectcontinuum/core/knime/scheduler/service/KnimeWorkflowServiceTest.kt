@@ -15,6 +15,7 @@ import org.projectcontinuum.core.knime.scheduler.exception.InvalidWorkflowFileEx
 import org.projectcontinuum.core.knime.scheduler.exception.KnimeWorkflowNotFoundException
 import org.projectcontinuum.core.knime.scheduler.repository.KnimeWorkflowExecutionRepository
 import org.projectcontinuum.core.knime.scheduler.repository.KnimeWorkflowRepository
+import org.projectcontinuum.core.knime.scheduler.util.KnimeWorkflowKeyBuilder
 import org.springframework.data.domain.PageRequest
 import org.springframework.mock.web.MockMultipartFile
 import java.util.UUID
@@ -140,7 +141,7 @@ class KnimeWorkflowServiceTest {
     assertEquals("FAILED", response.status)
     assertEquals(workflowId, response.workflowId)
     verify(objectStorageService).putObject(
-      eq("knime-workflows/users/alice/$workflowId/executions/${response.executionId}.knwf"),
+      eq(KnimeWorkflowKeyBuilder.buildExecution("alice", workflowId, response.executionId)),
       any(), any(), any()
     )
   }
