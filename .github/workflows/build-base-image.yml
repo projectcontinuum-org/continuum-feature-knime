@@ -13,6 +13,11 @@ on:
         required: true
         type: string
         default: 'eclipse-temurin:21-jre-jammy'
+      knime_version:
+        description: 'KNIME minor version of knime_image (selects extension update sites, e.g. 5.5)'
+        required: true
+        type: string
+        default: '5.5'
       tag:
         description: 'Tag for projectcontinuum/continuum-feature-knime-base'
         required: true
@@ -58,5 +63,6 @@ jobs:
           build-args: |
             KNIME_IMAGE=${{ inputs.knime_image }}
             JRE_IMAGE=${{ inputs.jre_image }}
+            KNIME_VERSION=${{ inputs.knime_version }}
           tags: projectcontinuum/continuum-feature-knime-base:${{ inputs.tag }}
           push: ${{ inputs.push }}
