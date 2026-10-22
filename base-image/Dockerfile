@@ -2,18 +2,18 @@
 #
 # Base image for the continuum-feature-knime worker.
 #
-# KNIME Analytics Platform (knime-full) + extra KNIME extensions + a dedicated Temurin 21 JRE for
+# KNIME Analytics Platform (knime-lts-full) + extra KNIME extensions + a dedicated Temurin 21 JRE for
 # the Spring Boot worker. The two runtimes are kept separate:
 #   - Worker JVM  -> /opt/java/openjdk (Temurin 21), on PATH so Jib's `java` entrypoint resolves to it
 #   - KNIME JVM   -> KNIME's bundled JRE, pinned via `-vm` in knime.ini (left untouched)
 #
-# knime-full is published for linux/amd64 only. On Apple Silicon build with:
+# knime-lts-full is published for linux/amd64 only. On Apple Silicon build with:
 #   docker buildx build --platform linux/amd64 -t projectcontinuum/continuum-feature-knime-base:<tag> base-image
 #
 # NOTE: tune the worker JVM via JDK_JAVA_OPTIONS (read only by the `java` launcher), never
 # JAVA_TOOL_OPTIONS — the latter is read by every JVM, including the KNIME one spawned by the worker.
 
-ARG KNIME_IMAGE=knime/knime-full:r-5.5.3-414
+ARG KNIME_IMAGE=knime/knime-lts-full:r-5.12.0-114
 ARG JRE_IMAGE=eclipse-temurin:21-jre-jammy
 
 FROM ${JRE_IMAGE} AS jre
@@ -21,7 +21,7 @@ FROM ${JRE_IMAGE} AS jre
 FROM ${KNIME_IMAGE}
 
 # KNIME minor version of KNIME_IMAGE — selects the matching extension update sites.
-ARG KNIME_VERSION=5.5
+ARG KNIME_VERSION=5.12
 
 ENV KNIME_HOME=/home/knime/knime
 
