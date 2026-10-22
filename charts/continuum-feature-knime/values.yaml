@@ -165,8 +165,10 @@ continuum:
     # no visibility into continuum-platform's internal Helm fullname either.
     apiServerBaseUrl: "http://continuum-platform-api-server:8080"
     credentialsServerBaseUrl: "http://continuum-platform-credentials-server:8080"
-    # Public URL the scheduler's own node points executions back at — must be
-    # externally reachable (via continuum-cloud-gateway), not cluster-local.
+    # URL the scheduler's own node points executions back at. If empty,
+    # defaults to this release's scheduler Service (http://<fullname>-scheduler:<port>).
+    # Override with an externally reachable URL (e.g. via continuum-cloud-gateway)
+    # if executors run outside the cluster/namespace.
     publicBaseUrl: ""
     storage:
       type: minio
