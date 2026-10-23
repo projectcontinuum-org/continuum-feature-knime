@@ -1,33 +1,26 @@
 name: Build Worker Base Image
 
+# Builds base-image/ exactly as committed — no version inputs, so a given commit always produces the
+# same image. The tag comes from base-image/VERSION and is never overwritten once published.
 on:
+  pull_request:
+    paths:
+      - "base-image/**"
+      - ".github/workflows/build-base-image.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "base-image/**"
+      - ".github/workflows/build-base-image.yml"
   workflow_dispatch:
-    inputs:
-      knime_image:
-        description: 'Upstream KNIME image (FROM)'
-        required: true
-        type: string
-        default: 'knime/knime-lts-full:r-5.12.0-114'
-      jre_image:
-        description: 'Image providing the worker JRE (copied from /opt/java/openjdk)'
-        required: true
-        type: string
-        default: 'eclipse-temurin:21-jre-jammy'
-      knime_version:
-        description: 'KNIME minor version of knime_image (selects extension update sites, e.g. 5.12)'
-        required: true
-        type: string
-        default: '5.12'
-      tag:
-        description: 'Tag for projectcontinuum/continuum-feature-knime-base'
-        required: true
-        type: string
-        default: 'r-5.12.0-114-jre21'
-      push:
-        description: 'Push image to Docker Hub'
-        required: true
-        type: boolean
-        default: false
+
+concurrency:
+  group: build-base-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: projectcontinuum/continuum-feature-knime-base
 
 jobs:
   build-base-image:
@@ -37,6 +30,39 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Read image version
+        id: version
+        run: |
+          version=$(tr -d '[:space:]' < base-image/VERSION)
+          if [[ ! "${version}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "::error file=base-image/VERSION::'${version}' is not a valid image tag"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      # Before the tag check, so the check also sees tags in a private repository.
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
+
+      # Published tags are immutable: a change under base-image/ needs a new VERSION. On pull requests
+      # this catches a missing bump before merge.
+      - name: Ensure tag is not published yet
+        run: |
+          ref="${IMAGE}:${{ steps.version.outputs.version }}"
+          if out=$(docker buildx imagetools inspect "${ref}" 2>&1); then
+            echo "::error file=base-image/VERSION::${ref} is already published — bump base-image/VERSION"
+            exit 1
+          fi
+          # Only a definite "not found" counts as unpublished; registry/network errors must not lead to an overwrite.
+          if ! grep -qi 'not found' <<< "${out}"; then
+            echo "::error::Could not check whether ${ref} exists: ${out}"
+            exit 1
+          fi
 
       # knime-lts-full layers are several GB; the default runner disk is too small without this.
       - name: Free disk space
@@ -48,21 +74,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
-        if: inputs.push
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
-
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: base-image
           platforms: linux/amd64
-          build-args: |
-            KNIME_IMAGE=${{ inputs.knime_image }}
-            JRE_IMAGE=${{ inputs.jre_image }}
-            KNIME_VERSION=${{ inputs.knime_version }}
-          tags: projectcontinuum/continuum-feature-knime-base:${{ inputs.tag }}
-          push: ${{ inputs.push }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+            ${{ env.IMAGE }}:${{ steps.version.outputs.version }}-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+          push: ${{ github.event_name != 'pull_request' }}

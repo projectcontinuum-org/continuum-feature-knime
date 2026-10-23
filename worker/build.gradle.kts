@@ -9,11 +9,13 @@ version = property("featureVersion").toString()
 // get continuum platform version from root project properties
 val continuumPlatformVersion = property("continuumPlatformVersion").toString()
 
+// knime-lts-full + dedicated Temurin 21 JRE for the worker — built from base-image/Dockerfile and
+// published under this tag by .github/workflows/build-base-image.yml. Must be pushed before :worker:jib.
+val baseImageVersion = rootProject.file("base-image/VERSION").readText().trim()
+
 continuum {
     continuumVersion.set(continuumPlatformVersion)
-    // knime-lts-full + dedicated Temurin 21 JRE for the worker — built from base-image/Dockerfile
-    // via .github/workflows/build-base-image.yml. Must be pushed before running :worker:jib.
-    jibFromImage.set("projectcontinuum/continuum-feature-knime-base:r-5.12.0-114-jre21")
+    jibFromImage.set("projectcontinuum/continuum-feature-knime-base:$baseImageVersion")
     jibToImage.set("projectcontinuum/continuum-feature-knime:${project.version}")
 }
 

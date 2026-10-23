@@ -16,21 +16,22 @@
 #
 # NOTE: tune the worker JVM via JDK_JAVA_OPTIONS (read only by the `java` launcher), never
 # JAVA_TOOL_OPTIONS — the latter is read by every JVM, including the KNIME one spawned by the worker.
+#
+# Reproducibility: everything that goes into the image is committed here. Upstream images are pinned
+# by digest (the tag is kept for readability only) and the .target files pin extension versions.
+# Any change in base-image/ must come with a bump of base-image/VERSION — the published tag.
 
-ARG KNIME_IMAGE=knime/knime-lts-full:r-5.12.0-114
-ARG JRE_IMAGE=eclipse-temurin:21-jre-jammy
-
-FROM ${JRE_IMAGE} AS jre
+FROM eclipse-temurin:21-jre-noble@sha256:35501d3f93173b420ac9001658eb68157e813316b865087e345c187fca422c4c AS jre
 
 # Compiles knime-target-installer (installs the units of PDE .target files via KNIME's p2 director).
-FROM gradle:8.14.3-jdk21-jammy AS target-installer
+FROM gradle:8.14.3-jdk21-noble@sha256:21bd311ed01360c189b8870c6b6e988199ff10f72d445d02fb39d3cff9da91d7 AS target-installer
 COPY --chmod=0755 with-extra-ca.sh /usr/local/bin/with-extra-ca
 COPY knime-target-installer /src
 RUN --mount=type=secret,id=extra_ca,mode=0444 with-extra-ca "${JAVA_HOME}" gradle -p /src build --no-daemon
 
-FROM ${KNIME_IMAGE}
+FROM knime/knime-lts-full:r-5.12.0-114@sha256:3a548ba98ef6f543c71e746357732e39160d59b83196a7a0d294a508dc6fb57b
 
-# KNIME minor version of KNIME_IMAGE — selects the matching extension update sites.
+# KNIME minor version of the image above — selects the matching extension update sites.
 ARG KNIME_VERSION=5.12
 
 ENV KNIME_HOME=/home/knime/knime
