@@ -2,8 +2,8 @@ apiVersion: v2
 name: continuum-feature-knime
 description: Project Continuum feature worker — KNIME workflow Temporal worker nodes, plus the KNIME workflow scheduler service
 type: application
-version: 0.1.4
-appVersion: "0.0.1"
+version: 0.1.5
+appVersion: "0.0.2"
 keywords:
   - continuum
   - workflow
