@@ -105,7 +105,7 @@ val frontendInstall by tasks.registering(NpmTask::class) {
     group = "frontend"
     args.set(listOf("install"))
     inputs.file(file("frontend/package.json"))
-    inputs.file(file("frontend/package-lock.json"))
+    inputs.files(file("frontend/package-lock.json")).optional()
     outputs.dir(file("frontend/node_modules"))
 }
 

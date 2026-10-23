@@ -95,7 +95,7 @@ spec:
             - name: CONTINUUM_CREDENTIALS_SERVER_URL
               value: {{ .Values.continuum.scheduler.credentialsServerBaseUrl | quote }}
             - name: CONTINUUM_KNIME_SCHEDULER_PUBLIC_URL
-              value: {{ .Values.continuum.scheduler.publicBaseUrl | quote }}
+              value: {{ .Values.continuum.scheduler.publicBaseUrl | default (printf "http://%s:%v" (include "continuum-feature-knime.scheduler.fullname" .) (.Values.continuum.scheduler.service.port | default 8084)) | quote }}
             - name: CONTINUUM_STORAGE_TYPE
               value: {{ .Values.continuum.scheduler.storage.type | quote }}
             - name: CONTINUUM_KNIME_WORKFLOW_BUCKET_NAME
