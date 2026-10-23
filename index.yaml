@@ -5,6 +5,26 @@ entries:
       continuum.io/requires: continuum-infra >= 0.1.0, continuum-platform >= 0.1.0
     apiVersion: v2
     appVersion: 0.0.1
+    created: "2026-10-23T11:21:14.820044487Z"
+    description: Project Continuum feature worker — KNIME workflow Temporal worker
+      nodes, plus the KNIME workflow scheduler service
+    digest: 23e21a46132ff8141ed13f47207a26db71ccd2214206790493794e7c3981e5fc
+    home: https://github.com/projectcontinuum
+    keywords:
+    - continuum
+    - workflow
+    - feature-worker
+    maintainers:
+    - name: Project Continuum
+    name: continuum-feature-knime
+    type: application
+    urls:
+    - https://github.com/projectcontinuum-org/continuum-feature-knime/releases/download/continuum-feature-knime-0.1.4/continuum-feature-knime-0.1.4.tgz
+    version: 0.1.4
+  - annotations:
+      continuum.io/requires: continuum-infra >= 0.1.0, continuum-platform >= 0.1.0
+    apiVersion: v2
+    appVersion: 0.0.1
     created: "2026-10-22T06:43:19.796664798Z"
     description: Project Continuum feature worker — KNIME workflow Temporal worker
       nodes, plus the KNIME workflow scheduler service
@@ -81,4 +101,4 @@ entries:
     urls:
     - https://github.com/projectcontinuum-org/continuum-feature-knime/releases/download/continuum-feature-knime-0.1.0/continuum-feature-knime-0.1.0.tgz
     version: 0.1.0
-generated: "2026-10-22T06:43:19.796674823Z"
+generated: "2026-10-23T11:21:14.820057306Z"
