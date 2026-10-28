@@ -1,6 +1,6 @@
 <div align="center">
   <h1>Continuum Feature KNIME Executor</h1>
-  <strong>Execute KNIME workflows in Continuum for <a href="https://github.com/projectcontinuum/Continuum">Project Continuum</a></strong>
+  <strong>Execute KNIME workflows in Continuum for <a href="https://github.com/projectcontinuum-org/continuum-platform-core">Project Continuum</a></strong>
 </div>
 
 <div align="center">
@@ -14,7 +14,7 @@
 
 ## 🌐 Part of Project Continuum
 
-This is the **KNIME workflow execution feature** for [Project Continuum](https://github.com/projectcontinuum/Continuum) — a distributed, crash-proof workflow execution platform. It enables seamless integration and orchestration of KNIME workflows within Continuum's workflow engine.
+This is the **KNIME workflow execution feature** for [Project Continuum](https://github.com/projectcontinuum-org/continuum-platform-core) — a distributed, crash-proof workflow execution platform. It enables seamless integration and orchestration of KNIME workflows within Continuum's workflow engine.
 
 ---
 
