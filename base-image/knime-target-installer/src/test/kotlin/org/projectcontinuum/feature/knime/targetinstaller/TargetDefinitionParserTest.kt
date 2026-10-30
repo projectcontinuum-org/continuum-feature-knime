@@ -19,18 +19,18 @@ class TargetDefinitionParserTest {
       """
       <?xml version="1.0" encoding="UTF-8" standalone="no"?>
       <?pde version="3.8"?>
-      <target name="Lilly KNIME Target" sequenceNumber="1512743975">
+      <target name="Example KNIME Target" sequenceNumber="1512743975">
           <locations>
               <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
                   <unit id="org.knime.features.base.feature.group" version="0.0.0"/>
                   <unit id="org.knime.features.python.feature.group" version="5.12.0.v202604301200"/>
-                  <repository location="http://update-site-knime-dev.paas-np.am.lilly.com/45/KNIME"/>
+                  <repository location="http://update-site.example.com/45/KNIME"/>
               </location>
               <location includeAllPlatforms="false" includeConfigurePhase="false" includeMode="planner" includeSource="true" type="InstallableUnit">
                   <unit id="org.rdkit.knime.feature.feature.group" version="0.0.0"/>
                   <unit id="org.knime.features.base.feature.group" version="0.0.0"/>
-                  <repository location="http://update-site-knime-dev.paas-np.am.lilly.com/45/Community/Trusted"/>
-                  <repository location="http://update-site-knime-dev.paas-np.am.lilly.com/45/KNIME"/>
+                  <repository location="http://update-site.example.com/45/Community/Trusted"/>
+                  <repository location="http://update-site.example.com/45/KNIME"/>
               </location>
           </locations>
           <targetJRE path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-11"/>
@@ -41,12 +41,12 @@ class TargetDefinitionParserTest {
 
     val target = TargetDefinitionParser.parse(file, env = emptyMap())
 
-    assertEquals("Lilly KNIME Target", target.name)
+    assertEquals("Example KNIME Target", target.name)
     assertEquals(2, target.locations.size)
     assertEquals(
       listOf(
-        "http://update-site-knime-dev.paas-np.am.lilly.com/45/KNIME",
-        "http://update-site-knime-dev.paas-np.am.lilly.com/45/Community/Trusted"
+        "http://update-site.example.com/45/KNIME",
+        "http://update-site.example.com/45/Community/Trusted"
       ),
       target.repositories
     )
