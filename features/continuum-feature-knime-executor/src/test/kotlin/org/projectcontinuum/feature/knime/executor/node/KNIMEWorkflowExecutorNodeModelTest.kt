@@ -169,10 +169,78 @@ class KNIMEWorkflowExecutorNodeModelTest {
   }
 
   @Test
-  fun `determineDestinationName leaves a literal percent sign in a local path untouched`() {
-    val destinationName = nodeModel.determineDestinationName("/tmp/100%complete.knwf")
+  fun `determineDestinationName does not percent-decode a local path`() {
+    // Local paths are never decoded: a literal '%' is only replaced by the safe-name sanitizer,
+    // and an encoded separator is not turned into a real one.
+    assertEquals("100_complete.knwf", nodeModel.determineDestinationName("/tmp/100%complete.knwf"))
+    assertEquals("a_2Fb.knwf", nodeModel.determineDestinationName("/tmp/a%2Fb.knwf"))
+  }
 
-    assertEquals("100%complete.knwf", destinationName)
+  private fun assertSafeDestinationName(location: String, expected: String) {
+    val destinationName = nodeModel.determineDestinationName(location)
+    assertEquals(expected, destinationName)
+
+    val tempDir = File(System.getProperty("java.io.tmpdir"), "knime_workspace_test")
+    val resolved = File(tempDir, destinationName)
+    assertTrue(resolved.canonicalPath.startsWith(tempDir.canonicalPath + File.separator))
+    assertEquals(tempDir.canonicalPath, resolved.canonicalFile.parentFile.path)
+  }
+
+  @Test
+  fun `determineDestinationName neutralises a percent-encoded command substitution`() {
+    assertSafeDestinationName(
+      "http://localhost:${server.address.port}/api/v1/knime-workflows/abc/content/%24(id).knwf",
+      "__id_.knwf"
+    )
+  }
+
+  @Test
+  fun `determineDestinationName neutralises percent-encoded backticks`() {
+    assertSafeDestinationName(
+      "http://localhost:${server.address.port}/api/v1/knime-workflows/abc/content/%60id%60.knwf",
+      "_id_.knwf"
+    )
+  }
+
+  @Test
+  fun `determineDestinationName keeps only the last component of a percent-encoded traversal`() {
+    assertSafeDestinationName(
+      "http://localhost:${server.address.port}/api/v1/knime-workflows/abc/content/..%2F..%2Fetc%2Fpasswd",
+      "passwd.knwf"
+    )
+  }
+
+  @Test
+  fun `determineDestinationName keeps only the last component of a percent-encoded backslash traversal`() {
+    assertSafeDestinationName(
+      "http://localhost:${server.address.port}/api/v1/knime-workflows/abc/content/..%5C..%5Cevil.knwf",
+      "evil.knwf"
+    )
+  }
+
+  @Test
+  fun `determineDestinationName replaces a percent-encoded newline`() {
+    assertSafeDestinationName(
+      "http://localhost:${server.address.port}/api/v1/knime-workflows/abc/content/a%0Ab.knwf",
+      "a_b.knwf"
+    )
+  }
+
+  @Test
+  fun `determineDestinationName falls back to workflow for a decoded dot-dot name`() {
+    assertSafeDestinationName(
+      "http://localhost:${server.address.port}/api/v1/knime-workflows/abc/content/%2E%2E",
+      "workflow.knwf"
+    )
+    assertSafeDestinationName(
+      "http://localhost:${server.address.port}/api/v1/knime-workflows/abc/content/..%2F",
+      "workflow.knwf"
+    )
+  }
+
+  @Test
+  fun `determineDestinationName sanitises shell metacharacters in a local path file name`() {
+    assertSafeDestinationName("/tmp/\$(id);`id`\"x\".knwf", "__id___id__x_.knwf")
   }
 
   @Test

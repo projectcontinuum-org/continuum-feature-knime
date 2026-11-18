@@ -46,6 +46,9 @@ class KNIMEWorkflowExecutorNodeModel(
     private const val STAGE_CLEANUP = "Cleanup"
 
     private val WORKFLOW_VARIABLE_TYPES = setOf("String", "int", "double")
+
+    // Anything outside this set is replaced in downloaded workflow file names (see sanitizeFileName).
+    private val UNSAFE_FILE_NAME_CHARS = Regex("[^A-Za-z0-9._ -]")
   }
 
   final override val inputPorts = emptyMap<String, ContinuumWorkflowModel.NodePort>()
@@ -349,6 +352,14 @@ class KNIMEWorkflowExecutorNodeModel(
         LOGGER.info("Downloading workflow from: $workflowLocation")
         val destFileName = determineDestinationName(workflowLocation)
         val workflowSource = File(tempDir, destFileName)
+        if (!workflowSource.canonicalPath.startsWith(tempDir.canonicalPath + File.separator)) {
+          throw NodeRuntimeException(
+            isRetriable = false,
+            workflowId = "",
+            nodeId = "",
+            message = "Resolved workflow file name escapes the temporary workspace: $destFileName"
+          )
+        }
         downloadWorkflow(workflowLocation, workflowSource, executionContext.ownerId)
 
         if (isHttpLocation) {
@@ -636,7 +647,20 @@ class KNIMEWorkflowExecutorNodeModel(
     } else {
       rawName
     }
-    return if (decodedName.lowercase().endsWith(".knwf")) decodedName else "$decodedName.knwf"
+    val safeName = sanitizeFileName(decodedName)
+    return if (safeName.lowercase().endsWith(".knwf")) safeName else "$safeName.knwf"
+  }
+
+  /**
+   * Reduces an (already decoded) file name to a safe base name for use inside the temp
+   * workspace: decoding can reintroduce `/`, `\`, `..` or control characters, so keep only the
+   * last path component and replace anything outside `[A-Za-z0-9._ -]` with `_`. Spaces are
+   * deliberately kept (see the decoding comment above). `.`/`..`/blank collapse to "workflow".
+   */
+  private fun sanitizeFileName(name: String): String {
+    val lastComponent = name.substringAfterLast("/").substringAfterLast("\\")
+    val cleaned = lastComponent.replace(UNSAFE_FILE_NAME_CHARS, "_").trim()
+    return if (cleaned.isEmpty() || cleaned.all { it == '.' }) "workflow" else cleaned
   }
 
   /**

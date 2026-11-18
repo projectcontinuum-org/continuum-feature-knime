@@ -33,6 +33,11 @@ out/
 /nbdist/
 /.nb-gradle/
 
+### Frontend build output ###
+# The scheduler's Vite build writes here (frontendBuild in scheduler/build.gradle.kts) and copyFrontend packages it,
+# so it is generated on every build. Bundle file names carry a content hash, so committing it makes a diff on every build.
+scheduler/frontend/dist/
+
 ### VS Code ###
 .vscode/
 
